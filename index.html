@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0b0f17" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="SOXL 루프" />
+  <link rel="manifest" href="./manifest.json" />
+  <link rel="stylesheet" href="./style.css" />
+  <title>SOXL 루프투자법 웹앱</title>
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="top-bar">
+      <div class="brand-wrap">
+        <div class="brand-badge">3X LOOP</div>
+        <div>
+          <h1 class="brand-title">SOXL 루프투자법</h1>
+          <p class="brand-sub" id="headerSummary">총시드 $10,000 · 배 18칸 · 썰물 ×2.5</p>
+        </div>
+      </div>
+      <div class="top-actions">
+        <button class="btn-ghost" id="btnExportJson" title="백업 내보내기">백업</button>
+        <button class="btn-ghost btn-danger-ghost" id="btnResetAll" title="초기화">초기화</button>
+      </div>
+    </header>
+
+    <!-- KPI Strip -->
+    <section class="kpi-grid" id="kpiStrip">
+      <div class="kpi-card">
+        <span class="kpi-label">복리 배(SOXL) 총자산</span>
+        <strong class="kpi-val" id="kpiSoxlTotal">$9,000.00</strong>
+        <span class="kpi-hint" id="kpiRealized">실현손익: $0.00</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">가용 현금 잔고</span>
+        <strong class="kpi-val accent-blue" id="kpiCash">$9,000.00</strong>
+        <span class="kpi-hint" id="kpiLotsCost">보유원금: $0.00</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">오늘 1회 기준액</span>
+        <strong class="kpi-val accent-amber" id="kpiUnitAmt">$1,250.00</strong>
+        <span class="kpi-hint" id="kpiUnitHint">썰물 기준 (밀물 $500)</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">등대(TQQQ) 비중</span>
+        <strong class="kpi-val accent-green" id="kpiBeaconRatio">10.0%</strong>
+        <span class="kpi-hint" id="kpiBeaconVal">배정: $1,000.00</span>
+      </div>
+    </section>
+
+    <!-- Main View Container -->
+    <main class="view-container">
+      <!-- TAB 1: LOC 주문표 -->
+      <section class="tab-panel active" id="tab-order">
+        <div class="card">
+          <div class="card-head">
+            <h2>오늘의 시장 기준 & LOC 설정</h2>
+            <span class="pill" id="tideBadge">썰물 모드</span>
+          </div>
+          <div class="form-grid-2">
+            <label class="field">
+              <span>기준 날짜</span>
+              <input type="date" id="inpOrderDate" />
+            </label>
+            <label class="field">
+              <span>오늘의 물때</span>
+              <select id="selTide">
+                <option value="썰물">썰물 (하락장 · 2.5배 확대)</option>
+                <option value="밀물">밀물 (상승장 · 1.0배 기본)</option>
+              </select>
+            </label>
+            <label class="field">
+              <span>SOXL 전일 종가 ($)</span>
+              <input type="number" step="0.01" id="inpPrevSoxl" />
+            </label>
+            <label class="field">
+              <span>TQQQ 전일 종가 ($)</span>
+              <input type="number" step="0.01" id="inpPrevTqqq" />
+            </label>
+          </div>
+
+          <div class="status-banner" id="cashStatusBanner">
+            <span id="cashCheckText">최대 매수 예약 합계 확인 중...</span>
+            <strong id="cashCheckAmount">$0.00</strong>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>LOC 매수 주문표 (그물 + 8단계 그물추)</h2>
+            <span class="muted-sm">수량·금액 직접 수정 가능</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="buyOrderTable">
+              <thead>
+                <tr>
+                  <th>구분</th>
+                  <th>등락률</th>
+                  <th>LOC 지정가</th>
+                  <th>배정액($)</th>
+                  <th>수량(주)</th>
+                  <th>예상체결($)</th>
+                  <th>실행</th>
+                </tr>
+              </thead>
+              <tbody id="buyOrderBody"></tbody>
+              <tfoot>
+                <tr class="total-row">
+                  <td colspan="3">합계 (수수료 반영)</td>
+                  <td id="buySumAlloc">$0.00</td>
+                  <td id="buySumQty">0주</td>
+                  <td id="buySumEst">$0.00</td>
+                  <td>-</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>LOC 익절 매도 주문표 (저가 우선)</h2>
+            <span class="muted-sm">목표가·수량 수정 가능</span>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="sellOrderTable">
+              <thead>
+                <tr>
+                  <th>순위</th>
+                  <th>묶음ID</th>
+                  <th>매수가</th>
+                  <th>수량</th>
+                  <th>목표가($)</th>
+                  <th>예상순익($)</th>
+                  <th>체결</th>
+                </tr>
+              </thead>
+              <tbody id="sellOrderBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 2: 보유 묶음(Lot) -->
+      <section class="tab-panel" id="tab-lots">
+        <div class="card">
+          <div class="card-head">
+            <h2>미청산 SOXL 보유 묶음(Lot)</h2>
+            <button class="btn-primary sm" id="btnAddLot">+ 묶음 추가</button>
+          </div>
+          <p class="muted-sm mb-10">증권사 앱 통합 평단가 대신 묶음별 매수가·수량을 별도 장부로 관리합니다. 모든 숫자는 탭하여 바로 수정할 수 있습니다.</p>
+          <div class="table-scroll">
+            <table class="data-table" id="lotsTable">
+              <thead>
+                <tr>
+                  <th>묶음ID</th>
+                  <th>매수일</th>
+                  <th>매수가($)</th>
+                  <th>수량(주)</th>
+                  <th>원금($)</th>
+                  <th>평가손익($)</th>
+                  <th>삭제</th>
+                </tr>
+              </thead>
+              <tbody id="lotsBody"></tbody>
+              <tfoot>
+                <tr class="total-row">
+                  <td colspan="3">미청산 합계</td>
+                  <td id="lotSumQty">0주</td>
+                  <td id="lotSumCost">$0.00</td>
+                  <td id="lotSumPnl">$0.00</td>
+                  <td>-</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 3: 매매일지 -->
+      <section class="tab-panel" id="tab-journal">
+        <div class="card">
+          <div class="card-head">
+            <h2>실전 매수·매도 일지</h2>
+            <button class="btn-primary sm" id="btnAddJournal">+ 체결 추가</button>
+          </div>
+          <div class="table-scroll">
+            <table class="data-table" id="journalTable">
+              <thead>
+                <tr>
+                  <th>일자</th>
+                  <th>물때</th>
+                  <th>구분</th>
+                  <th>묶음</th>
+                  <th>체결가($)</th>
+                  <th>수량</th>
+                  <th>매수가($)</th>
+                  <th>실현손익($)</th>
+                  <th>삭제</th>
+                </tr>
+              </thead>
+              <tbody id="journalBody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- TAB 4: 설정 & 리밸런싱 -->
+      <section class="tab-panel" id="tab-settings">
+        <div class="card">
+          <div class="card-head">
+            <h2>총투자금 및 전략 파라미터 설정</h2>
+            <span class="pill">실시간 반영</span>
+          </div>
+          <div class="form-grid-2">
+            <label class="field">
+              <span>초기 총 투자원금 ($)</span>
+              <input type="number" step="100" id="cfgTotalSeed" />
+            </label>
+            <label class="field">
+              <span>등대(TQQQ) 목표 비중 (%)</span>
+              <input type="number" step="1" id="cfgBeaconPct" />
+            </label>
+            <label class="field">
+              <span>배 자금 분할 칸수</span>
+              <input type="number" step="1" id="cfgDivisions" />
+            </label>
+            <label class="field">
+              <span>썰물 매수 배수 (배)</span>
+              <input type="number" step="0.1" id="cfgEbbMult" />
+            </label>
+            <label class="field">
+              <span>목표 익절 수익률 (%)</span>
+              <input type="number" step="0.1" id="cfgTargetPct" />
+            </label>
+            <label class="field">
+              <span>편도 수수료율 (%)</span>
+              <input type="number" step="0.01" id="cfgFeePct" />
+            </label>
+            <label class="field full-span">
+              <span>복리 시드 자동 연동 (실현손익 반영)</span>
+              <select id="cfgCompound">
+                <option value="Y">Y — 실현손익을 배 자산에 합산해 1칸 금액 증액</option>
+                <option value="N">N — 초기 배 원금 기준으로 고정 유지</option>
+              </select>
+            </label>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-head">
+            <h2>분기별 등대(1) : 배(9) 리밸런싱</h2>
+          </div>
+          <div class="form-grid-2">
+            <label class="field">
+              <span>현재 TQQQ 등대 평가금 ($)</span>
+              <input type="number" step="10" id="rebTqqqVal" />
+            </label>
+            <label class="field">
+              <span>현재 SOXL 배 총자산 ($)</span>
+              <input type="number" step="10" id="rebSoxlVal" />
+            </label>
+          </div>
+          <div class="rebal-box" id="rebalResultBox">
+            <div>전체 합산: <strong id="rebTotalVal">$0.00</strong> · 현재 등대 비중: <strong id="rebCurrPct">0.0%</strong></div>
+            <div class="rebal-action" id="rebActionText">조정 내역 계산 중...</div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- Bottom Navigation for iPhone -->
+    <nav class="bottom-nav">
+      <button class="nav-btn active" data-tab="tab-order">
+        <span class="nav-ico">📋</span>
+        <span>LOC 주문</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-lots">
+        <span class="nav-ico">📦</span>
+        <span>보유묶음</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-journal">
+        <span class="nav-ico">📒</span>
+        <span>매매일지</span>
+      </button>
+      <button class="nav-btn" data-tab="tab-settings">
+        <span class="nav-ico">⚙️</span>
+        <span>설정/리밸</span>
+      </button>
+    </nav>
+  </div>
+
+  <input type="file" id="fileImportJson" accept=".json" style="display:none" />
+  <script src="./app.js"></script>
+</body>
+</html>

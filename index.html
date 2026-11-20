@@ -24,7 +24,7 @@
       </div>
       <div class="top-actions">
         <button class="btn-ghost" id="btnExportJson" title="백업 내보내기">백업</button>
-        <button class="btn-ghost btn-danger-ghost" id="btnResetAll" title="초기화">초기화</button>
+        <button class="btn-ghost btn-danger-ghost" id="btnResetAll" title="0으로 초기화">초기화</button>
       </div>
     </header>
 
@@ -46,9 +46,9 @@
         <span class="kpi-hint" id="kpiUnitHint">썰물 기준 (밀물 $500)</span>
       </div>
       <div class="kpi-card">
-        <span class="kpi-label">등대(TQQQ) 비중</span>
-        <strong class="kpi-val accent-green" id="kpiBeaconRatio">10.0%</strong>
-        <span class="kpi-hint" id="kpiBeaconVal">배정: $1,000.00</span>
+        <span class="kpi-label">등대(TQQQ) 투자금 · 비중</span>
+        <strong class="kpi-val accent-green" id="kpiBeaconRatio">$1,000.00 (10.0%)</strong>
+        <span class="kpi-hint" id="kpiBeaconVal">매수가 $0.00 · 0주</span>
       </div>
     </section>
 
@@ -69,8 +69,8 @@
             <label class="field">
               <span>오늘의 물때</span>
               <select id="selTide">
-                <option value="썰물">썰물 (하락장 · 2.5배 확대)</option>
-                <option value="밀물">밀물 (상승장 · 1.0배 기본)</option>
+                <option value="썰물">썰물 (하락 · 2.5배)</option>
+                <option value="밀물">밀물 (상승 · 1.0배)</option>
               </select>
             </label>
             <label class="field">
@@ -89,59 +89,55 @@
           </div>
         </div>
 
+        <!-- TQQQ 등대 현황 및 매수 카드 -->
         <div class="card">
           <div class="card-head">
-            <h2>LOC 매수 주문표 (그물 + 8단계 그물추)</h2>
-            <span class="muted-sm">수량·금액 직접 수정 가능</span>
+            <h2>등대(TQQQ) 투자금 · 매수 단가/수량</h2>
+            <span class="muted-sm">직접 수정 가능</span>
           </div>
-          <div class="table-scroll">
-            <table class="data-table" id="buyOrderTable">
-              <thead>
-                <tr>
-                  <th>구분</th>
-                  <th>등락률</th>
-                  <th>LOC 지정가</th>
-                  <th>배정액($)</th>
-                  <th>수량(주)</th>
-                  <th>예상체결($)</th>
-                  <th>실행</th>
-                </tr>
-              </thead>
-              <tbody id="buyOrderBody"></tbody>
-              <tfoot>
-                <tr class="total-row">
-                  <td colspan="3">합계 (수수료 반영)</td>
-                  <td id="buySumAlloc">$0.00</td>
-                  <td id="buySumQty">0주</td>
-                  <td id="buySumEst">$0.00</td>
-                  <td>-</td>
-                </tr>
-              </tfoot>
-            </table>
+          <div class="form-grid-3">
+            <label class="field">
+              <span>TQQQ 총 투자금($)</span>
+              <input type="number" step="10" id="inpTqqqInvest" />
+            </label>
+            <label class="field">
+              <span>TQQQ 매수 단가($)</span>
+              <input type="number" step="0.01" id="inpTqqqBuyPrice" />
+            </label>
+            <label class="field">
+              <span>TQQQ 보유 수량(주)</span>
+              <input type="number" step="1" id="inpTqqqQty" />
+            </label>
+          </div>
+          <div class="tqqq-summary-line" id="tqqqSummaryLine">
+            실투자원금: $0.00 · 현재평가금: $0.00 · 평가손익: $0.00
           </div>
         </div>
 
-        <div class="card">
+        <!-- LOC 매수 주문표 (한 화면 최적화 2줄 컴팩트 그리드) -->
+        <div class="card card-tight">
+          <div class="card-head">
+            <h2>LOC 매수 주문표 (그물 + 8단계 그물추)</h2>
+            <span class="muted-sm">등락률·가격·액수·수량 수정</span>
+          </div>
+          <div class="order-list" id="buyOrderList"></div>
+          <div class="order-total-bar">
+            <span>합계 (수수료 반영)</span>
+            <div>
+              <span id="buySumAlloc">$0.00</span> ·
+              <strong id="buySumQty">0주</strong> ·
+              <strong class="accent-blue" id="buySumEst">$0.00</strong>
+            </div>
+          </div>
+        </div>
+
+        <!-- LOC 익절 매도 주문표 (한 화면 최적화 + 삭제 버튼) -->
+        <div class="card card-tight">
           <div class="card-head">
             <h2>LOC 익절 매도 주문표 (저가 우선)</h2>
-            <span class="muted-sm">목표가·수량 수정 가능</span>
+            <span class="muted-sm">목표가·수량 수정 / 삭제</span>
           </div>
-          <div class="table-scroll">
-            <table class="data-table" id="sellOrderTable">
-              <thead>
-                <tr>
-                  <th>순위</th>
-                  <th>묶음ID</th>
-                  <th>매수가</th>
-                  <th>수량</th>
-                  <th>목표가($)</th>
-                  <th>예상순익($)</th>
-                  <th>체결</th>
-                </tr>
-              </thead>
-              <tbody id="sellOrderBody"></tbody>
-            </table>
-          </div>
+          <div class="order-list" id="sellOrderList"></div>
         </div>
       </section>
 
@@ -152,7 +148,7 @@
             <h2>미청산 SOXL 보유 묶음(Lot)</h2>
             <button class="btn-primary sm" id="btnAddLot">+ 묶음 추가</button>
           </div>
-          <p class="muted-sm mb-10">증권사 앱 통합 평단가 대신 묶음별 매수가·수량을 별도 장부로 관리합니다. 모든 숫자는 탭하여 바로 수정할 수 있습니다.</p>
+          <p class="muted-sm mb-10">묶음별 매수가·수량을 별도 장부로 관리합니다. 모든 숫자는 탭하여 바로 수정할 수 있습니다.</p>
           <div class="table-scroll">
             <table class="data-table" id="lotsTable">
               <thead>
@@ -222,6 +218,10 @@
               <input type="number" step="100" id="cfgTotalSeed" />
             </label>
             <label class="field">
+              <span>등대(TQQQ) 총 투자금 ($)</span>
+              <input type="number" step="10" id="cfgBeaconInvest" />
+            </label>
+            <label class="field">
               <span>등대(TQQQ) 목표 비중 (%)</span>
               <input type="number" step="1" id="cfgBeaconPct" />
             </label>
@@ -241,11 +241,11 @@
               <span>편도 수수료율 (%)</span>
               <input type="number" step="0.01" id="cfgFeePct" />
             </label>
-            <label class="field full-span">
-              <span>복리 시드 자동 연동 (실현손익 반영)</span>
+            <label class="field">
+              <span>복리 시드 자동 연동</span>
               <select id="cfgCompound">
-                <option value="Y">Y — 실현손익을 배 자산에 합산해 1칸 금액 증액</option>
-                <option value="N">N — 초기 배 원금 기준으로 고정 유지</option>
+                <option value="Y">Y — 실현손익 합산 증액</option>
+                <option value="N">N — 초기 원금 고정</option>
               </select>
             </label>
           </div>
@@ -294,7 +294,6 @@
     </nav>
   </div>
 
-  <input type="file" id="fileImportJson" accept=".json" style="display:none" />
   <script src="./app.js"></script>
 </body>
 </html>

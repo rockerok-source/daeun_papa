@@ -11,7 +11,7 @@
   --green: #22c55e;
   --amber: #f59e0b;
   --red: #f87171;
-  --radius: 14px;
+  --radius: 13px;
 }
 
 * {
@@ -22,18 +22,20 @@
 html, body {
   margin: 0;
   padding: 0;
+  width: 100%;
+  overflow-x: hidden;
   background: var(--bg-app);
   color: var(--text-main);
   font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
-  font-size: 14px;
-  line-height: 1.4;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .app-shell {
-  max-width: 680px;
+  max-width: 600px;
   margin: 0 auto;
   min-height: 100vh;
-  padding-bottom: calc(74px + env(safe-area-inset-bottom));
+  padding-bottom: calc(70px + env(safe-area-inset-bottom));
 }
 
 /* Top Header */
@@ -44,8 +46,8 @@ html, body {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: calc(12px + env(safe-area-inset-top)) 16px 12px;
-  background: rgba(11, 15, 23, 0.9);
+  padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+  background: rgba(11, 15, 23, 0.92);
   backdrop-filter: blur(12px);
   border-bottom: 1px solid var(--border);
 }
@@ -53,43 +55,48 @@ html, body {
 .brand-wrap {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
+  min-width: 0;
 }
 
 .brand-badge {
   background: linear-gradient(135deg, #0284c7, #2563eb);
   color: #fff;
   font-weight: 800;
-  font-size: 11px;
-  padding: 5px 8px;
-  border-radius: 8px;
-  letter-spacing: 0.4px;
+  font-size: 10px;
+  padding: 4px 7px;
+  border-radius: 7px;
+  flex-shrink: 0;
 }
 
 .brand-title {
   margin: 0;
-  font-size: 16px;
+  font-size: 15px;
   font-weight: 700;
 }
 
 .brand-sub {
-  margin: 2px 0 0;
-  font-size: 11px;
+  margin: 1px 0 0;
+  font-size: 10.5px;
   color: var(--text-sub);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .top-actions {
   display: flex;
-  gap: 6px;
+  gap: 5px;
+  flex-shrink: 0;
 }
 
 .btn-ghost {
   background: var(--bg-card);
   color: var(--text-main);
   border: 1px solid var(--border);
-  border-radius: 8px;
-  padding: 6px 10px;
-  font-size: 12px;
+  border-radius: 7px;
+  padding: 5px 8px;
+  font-size: 11px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -103,15 +110,15 @@ html, body {
   background: #0284c7;
   color: #fff;
   border: none;
-  border-radius: 8px;
-  padding: 7px 12px;
-  font-size: 12px;
+  border-radius: 7px;
+  padding: 6px 10px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
 
 .btn-primary.sm {
-  padding: 5px 10px;
+  padding: 4px 9px;
 }
 
 .btn-exec {
@@ -119,7 +126,7 @@ html, body {
   color: #4ade80;
   border: 1px solid rgba(34, 197, 94, 0.4);
   border-radius: 6px;
-  padding: 4px 8px;
+  padding: 4px 7px;
   font-size: 11px;
   font-weight: 700;
   cursor: pointer;
@@ -140,34 +147,41 @@ html, body {
 .kpi-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 8px;
-  padding: 12px 14px 4px;
+  gap: 7px;
+  padding: 10px 10px 2px;
 }
 
 .kpi-card {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 10px 12px;
+  padding: 9px 10px;
   display: flex;
   flex-direction: column;
   gap: 2px;
+  min-width: 0;
 }
 
 .kpi-label {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-sub);
 }
 
 .kpi-val {
-  font-size: 17px;
+  font-size: 15px;
   font-weight: 800;
-  letter-spacing: -0.2px;
+  letter-spacing: -0.3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .kpi-hint {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .accent-blue { color: var(--blue); }
@@ -177,7 +191,7 @@ html, body {
 
 /* Cards & Tabs */
 .view-container {
-  padding: 10px 14px;
+  padding: 8px 10px;
 }
 
 .tab-panel {
@@ -192,20 +206,25 @@ html, body {
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  padding: 14px;
-  margin-bottom: 12px;
+  padding: 11px;
+  margin-bottom: 10px;
+}
+
+.card.card-tight {
+  padding: 10px 8px;
 }
 
 .card-head {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+  padding: 0 2px;
 }
 
 .card-head h2 {
   margin: 0;
-  font-size: 15px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -213,9 +232,9 @@ html, body {
   background: rgba(56, 189, 248, 0.14);
   color: var(--blue);
   border: 1px solid rgba(56, 189, 248, 0.35);
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 700;
-  padding: 3px 9px;
+  padding: 2px 8px;
   border-radius: 999px;
 }
 
@@ -226,25 +245,32 @@ html, body {
 }
 
 .muted-sm {
-  font-size: 12px;
+  font-size: 11px;
   color: var(--text-sub);
 }
 
 .mb-10 {
-  margin: 0 0 10px;
+  margin: 0 0 8px;
 }
 
 /* Inputs */
 .form-grid-2 {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 10px;
+  gap: 8px;
+}
+
+.form-grid-3 {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
 }
 
 .field {
   display: flex;
   flex-direction: column;
-  gap: 5px;
+  gap: 4px;
+  min-width: 0;
 }
 
 .field.full-span {
@@ -252,19 +278,23 @@ html, body {
 }
 
 .field span {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-sub);
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 input, select {
   width: 100%;
+  min-width: 0;
   background: var(--bg-input);
   color: var(--text-main);
   border: 1px solid var(--border);
-  border-radius: 9px;
-  padding: 8px 10px;
-  font-size: 14px;
+  border-radius: 8px;
+  padding: 7px 8px;
+  font-size: 13px;
   font-weight: 600;
 }
 
@@ -273,17 +303,28 @@ input:focus, select:focus {
   border-color: var(--blue);
 }
 
+.tqqq-summary-line {
+  margin-top: 8px;
+  padding: 7px 9px;
+  border-radius: 8px;
+  background: var(--bg-card-alt);
+  font-size: 11px;
+  color: var(--text-sub);
+  text-align: center;
+}
+
 .status-banner {
-  margin-top: 10px;
-  padding: 9px 12px;
-  border-radius: 10px;
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
   background: rgba(34, 197, 94, 0.12);
   border: 1px solid rgba(34, 197, 94, 0.35);
   color: #86efac;
   display: flex;
   justify-content: space-between;
   align-items: center;
-  font-size: 12px;
+  font-size: 11px;
+  gap: 6px;
 }
 
 .status-banner.over {
@@ -292,7 +333,95 @@ input:focus, select:focus {
   color: #fca5a5;
 }
 
-/* Editable Tables */
+/* Single-Screen Fit Mobile Order Cards (No Horizontal Scroll!) */
+.order-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.order-row-card {
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  padding: 7px 8px;
+}
+
+.order-row-card.prio1 {
+  border-color: rgba(34, 197, 94, 0.5);
+  background: rgba(34, 197, 94, 0.07);
+}
+
+.order-row-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 5px;
+  font-size: 11.5px;
+}
+
+.order-row-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-weight: 700;
+}
+
+.order-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.order-fields-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 5px;
+}
+
+.order-fields-grid.sell-grid {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.mini-field {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.mini-field label {
+  font-size: 9.5px;
+  color: var(--text-sub);
+  text-align: center;
+}
+
+.mini-input {
+  width: 100%;
+  min-width: 0;
+  padding: 5px 4px;
+  font-size: 12px;
+  font-weight: 700;
+  text-align: right;
+  background: #0f1623;
+  border: 1px solid #334155;
+  border-radius: 6px;
+  color: #7dd3fc;
+}
+
+.order-total-bar {
+  margin-top: 8px;
+  padding: 8px 10px;
+  border-radius: 9px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+}
+
+/* Editable Tables for Lots & Journal */
 .table-scroll {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
@@ -301,22 +430,21 @@ input:focus, select:focus {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  font-size: 12px;
-  min-width: 540px;
+  font-size: 11.5px;
 }
 
 .data-table th {
   background: var(--bg-card-alt);
   color: var(--text-sub);
   font-weight: 700;
-  padding: 8px 6px;
+  padding: 7px 4px;
   border-bottom: 1px solid var(--border);
   text-align: center;
   white-space: nowrap;
 }
 
 .data-table td {
-  padding: 6px 5px;
+  padding: 5px 3px;
   border-bottom: 1px solid rgba(36, 48, 68, 0.65);
   text-align: center;
   vertical-align: middle;
@@ -324,9 +452,9 @@ input:focus, select:focus {
 }
 
 .cell-input {
-  width: 78px;
-  padding: 5px 6px;
-  font-size: 12px;
+  width: 68px;
+  padding: 4px 5px;
+  font-size: 11.5px;
   font-weight: 700;
   text-align: right;
   background: #172033;
@@ -336,24 +464,20 @@ input:focus, select:focus {
 }
 
 .cell-input.sm-id {
-  width: 66px;
+  width: 58px;
   text-align: center;
   color: var(--text-main);
 }
 
 .cell-input.sm-date {
-  width: 96px;
+  width: 88px;
   text-align: center;
   color: var(--text-main);
 }
 
 .cell-input.sm-qty {
-  width: 56px;
+  width: 48px;
   text-align: right;
-}
-
-.row-prio1 td {
-  background: rgba(34, 197, 94, 0.08);
 }
 
 .total-row td {
@@ -362,20 +486,20 @@ input:focus, select:focus {
   color: var(--text-main);
   border-top: 1px solid var(--border);
   border-bottom: none;
-  padding: 8px 6px;
+  padding: 7px 4px;
 }
 
 .rebal-box {
-  margin-top: 12px;
-  padding: 11px 12px;
-  border-radius: 10px;
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 9px;
   background: var(--bg-card-alt);
   border: 1px solid var(--border);
-  font-size: 12px;
+  font-size: 11.5px;
 }
 
 .rebal-action {
-  margin-top: 6px;
+  margin-top: 5px;
   font-weight: 700;
   color: var(--blue);
 }
@@ -389,7 +513,7 @@ input:focus, select:focus {
   z-index: 40;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  background: rgba(11, 15, 23, 0.95);
+  background: rgba(11, 15, 23, 0.96);
   backdrop-filter: blur(14px);
   border-top: 1px solid var(--border);
   padding-bottom: env(safe-area-inset-bottom);
@@ -399,12 +523,12 @@ input:focus, select:focus {
   background: transparent;
   border: none;
   color: var(--text-muted);
-  padding: 8px 4px;
+  padding: 7px 4px;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 2px;
-  font-size: 11px;
+  font-size: 10.5px;
   font-weight: 600;
   cursor: pointer;
 }
@@ -414,5 +538,5 @@ input:focus, select:focus {
 }
 
 .nav-ico {
-  font-size: 16px;
+  font-size: 15px;
 }

@@ -114,7 +114,7 @@
           </div>
         </div>
 
-        <!-- LOC 매수 주문표 (한 화면 최적화 2줄 컴팩트 그리드) -->
+        <!-- LOC 매수 주문표 (한 화면 최적화) -->
         <div class="card card-tight">
           <div class="card-head">
             <h2>LOC 매수 주문표 (그물 + 8단계 그물추)</h2>
@@ -143,64 +143,36 @@
 
       <!-- TAB 2: 보유 묶음(Lot) -->
       <section class="tab-panel" id="tab-lots">
-        <div class="card">
+        <div class="card card-tight">
           <div class="card-head">
             <h2>미청산 SOXL 보유 묶음(Lot)</h2>
             <button class="btn-primary sm" id="btnAddLot">+ 묶음 추가</button>
           </div>
-          <p class="muted-sm mb-10">묶음별 매수가·수량을 별도 장부로 관리합니다. 모든 숫자는 탭하여 바로 수정할 수 있습니다.</p>
-          <div class="table-scroll">
-            <table class="data-table" id="lotsTable">
-              <thead>
-                <tr>
-                  <th>묶음ID</th>
-                  <th>매수일</th>
-                  <th>매수가($)</th>
-                  <th>수량(주)</th>
-                  <th>원금($)</th>
-                  <th>평가손익($)</th>
-                  <th>삭제</th>
-                </tr>
-              </thead>
-              <tbody id="lotsBody"></tbody>
-              <tfoot>
-                <tr class="total-row">
-                  <td colspan="3">미청산 합계</td>
-                  <td id="lotSumQty">0주</td>
-                  <td id="lotSumCost">$0.00</td>
-                  <td id="lotSumPnl">$0.00</td>
-                  <td>-</td>
-                </tr>
-              </tfoot>
-            </table>
+          <p class="muted-sm mb-10" style="padding:0 2px;">묶음별 매수가·수량을 별도 장부로 관리합니다. 모든 숫자는 탭하여 바로 수정할 수 있습니다.</p>
+          <div class="order-list" id="lotsList"></div>
+          <div class="order-total-bar">
+            <span>미청산 합계</span>
+            <div>
+              <strong id="lotSumQty">0주</strong> ·
+              <span id="lotSumCost">$0.00</span> ·
+              <strong id="lotSumPnl">$0.00</strong>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- TAB 3: 매매일지 -->
+      <!-- TAB 3: 매매일지 (좌우 스크롤 없는 한 화면 카드 레이아웃) -->
       <section class="tab-panel" id="tab-journal">
-        <div class="card">
+        <div class="card card-tight">
           <div class="card-head">
             <h2>실전 매수·매도 일지</h2>
             <button class="btn-primary sm" id="btnAddJournal">+ 체결 추가</button>
           </div>
-          <div class="table-scroll">
-            <table class="data-table" id="journalTable">
-              <thead>
-                <tr>
-                  <th>일자</th>
-                  <th>물때</th>
-                  <th>구분</th>
-                  <th>묶음</th>
-                  <th>체결가($)</th>
-                  <th>수량</th>
-                  <th>매수가($)</th>
-                  <th>실현손익($)</th>
-                  <th>삭제</th>
-                </tr>
-              </thead>
-              <tbody id="journalBody"></tbody>
-            </table>
+          <p class="muted-sm mb-10" style="padding:0 2px;">일자·물때·구분·체결가·수량·기준매수가를 한 화면에서 바로 수정하고 실현손익을 확인하세요.</p>
+          <div class="order-list" id="journalList"></div>
+          <div class="order-total-bar">
+            <span>누적 실현손익 (수수료 차감)</span>
+            <strong id="journalTotalPnl">$0.00</strong>
           </div>
         </div>
       </section>

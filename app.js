@@ -1,4 +1,4 @@
-const STORAGE_KEY = "soxl_loop_pwa_v2_state";
+const STORAGE_KEY = "soxl_loop_pwa_v3_state";
 
 const DEFAULT_STATE = {
   config: {
@@ -151,7 +151,6 @@ function calcMetrics() {
 
   const cashBalance = soxlTotalAsset - openCost;
 
-  // TQQQ beacon stats
   const tqqqBuyPrice = Number(state.tqqq.buyPrice) || 0;
   const tqqqQty = Number(state.tqqq.qty) || 0;
   const tqqqActualCost = tqqqBuyPrice * tqqqQty;
@@ -190,7 +189,6 @@ function renderAll() {
   const cfg = state.config;
   const oi = state.orderInput;
 
-  // Header & KPI
   document.getElementById("headerSummary").textContent =
     `총시드 ${fmtUsd(m.totalSeed)} · 배 ${cfg.divisions}칸 · ${oi.tide} ×${oi.tide === "썰물" ? cfg.ebbMult : 1}`;
 
@@ -208,13 +206,11 @@ function renderAll() {
   document.getElementById("kpiBeaconRatio").textContent = `${fmtUsd(m.beaconInvest)} (${m.beaconRatio.toFixed(1)}%)`;
   document.getElementById("kpiBeaconVal").textContent = `매수 $${m.tqqqBuyPrice.toFixed(2)} · ${m.tqqqQty}주`;
 
-  // Order Inputs
   document.getElementById("inpOrderDate").value = oi.date;
   document.getElementById("selTide").value = oi.tide;
   document.getElementById("inpPrevSoxl").value = oi.prevSoxl;
   document.getElementById("inpPrevTqqq").value = oi.prevTqqq;
 
-  // TQQQ Inputs
   document.getElementById("inpTqqqInvest").value = m.beaconInvest;
   document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice;
   document.getElementById("inpTqqqQty").value = m.tqqqQty;
@@ -228,7 +224,7 @@ function renderAll() {
   renderBuyOrders(m);
   renderSellOrders(m);
   renderLots(m);
-  renderJournal();
+  renderJournal(m);
   renderSettingsAndRebal(m);
 }
 
@@ -245,13 +241,11 @@ function renderBuyOrders(m) {
   LADDER_SPEC.forEach((spec, idx) => {
     const ov = state.buyOverrides[idx] || {};
 
-    // Editable dropPct (%)
     const defaultDropPct = spec.isNet
       ? (prevSoxl > 0 ? Number(((-0.01 / prevSoxl) * 100).toFixed(2)) : 0)
       : spec.defaultDropPct;
     const dropPct = ov.dropPct !== undefined ? Number(ov.dropPct) : defaultDropPct;
 
-    // Price derived from dropPct unless overridden directly
     const defaultPrice = spec.isNet && ov.dropPct === undefined
       ? Number(Math.max(0, prevSoxl - 0.01).toFixed(2))
       : Number(Math.max(0, prevSoxl * (1 + dropPct / 100)).toFixed(2));
@@ -330,8 +324,8 @@ function renderBuyOrders(m) {
 
       if (field === "dropPct") {
         curOv.dropPct = val;
-        delete curOv.price; // recalculate price from new dropPct
-        delete curOv.qty;   // recalculate qty from new price
+        delete curOv.price;
+        delete curOv.qty;
       } else if (field === "price") {
         curOv.price = val;
         if (prevSoxl > 0) {
@@ -490,13 +484,17 @@ function renderSellOrders(m) {
 }
 
 function renderLots(m) {
-  const tbody = document.getElementById("lotsBody");
-  tbody.innerHTML = "";
+  const listEl = document.getElementById("lotsList");
+  listEl.innerHTML = "";
   const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
 
   let sumQty = 0;
   let sumCost = 0;
   let sumPnl = 0;
+
+  if (state.lots.length === 0) {
+    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">보유 중인 묶음이 없습니다.</div>`;
+  }
 
   state.lots.forEach((lot, idx) => {
     const bp = Number(lot.buyPrice) || 0;
@@ -507,24 +505,48 @@ function renderLots(m) {
     sumCost += cost;
     sumPnl += pnl;
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><input type="text" class="cell-input sm-id" data-lot-idx="${idx}" data-field="id" value="${lot.id}" /></td>
-      <td><input type="text" class="cell-input sm-date" data-lot-idx="${idx}" data-field="date" value="${lot.date}" /></td>
-      <td><input type="number" step="0.01" class="cell-input" data-lot-idx="${idx}" data-field="buyPrice" value="${bp.toFixed(2)}" /></td>
-      <td><input type="number" step="1" class="cell-input sm-qty" data-lot-idx="${idx}" data-field="qty" value="${q}" /></td>
-      <td>${fmtUsd(cost)}</td>
-      <td class="${pnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(pnl)}</td>
-      <td><button class="btn-del" data-del-lot="${idx}">삭제</button></td>
+    const card = document.createElement("div");
+    card.className = "order-row-card";
+    card.innerHTML = `
+      <div class="order-row-top">
+        <div class="order-row-title">
+          <span>${lot.id}</span>
+          <span class="muted-sm">원금 ${fmtUsd(cost)}</span>
+        </div>
+        <div class="order-row-meta">
+          <span class="${pnl >= 0 ? "accent-green" : "accent-red"}"><strong>${fmtUsd(pnl)}</strong></span>
+          <button class="btn-del" data-del-lot="${idx}">삭제</button>
+        </div>
+      </div>
+      <div class="order-fields-grid">
+        <div class="mini-field">
+          <label>묶음ID</label>
+          <input type="text" class="mini-input center" data-lot-idx="${idx}" data-field="id" value="${lot.id}" />
+        </div>
+        <div class="mini-field">
+          <label>매수일</label>
+          <input type="text" class="mini-input center" data-lot-idx="${idx}" data-field="date" value="${lot.date}" />
+        </div>
+        <div class="mini-field">
+          <label>매수가($)</label>
+          <input type="number" step="0.01" class="mini-input" data-lot-idx="${idx}" data-field="buyPrice" value="${bp.toFixed(2)}" />
+        </div>
+        <div class="mini-field">
+          <label>수량(주)</label>
+          <input type="number" step="1" class="mini-input" data-lot-idx="${idx}" data-field="qty" value="${q}" />
+        </div>
+      </div>
     `;
-    tbody.appendChild(tr);
+    listEl.appendChild(card);
   });
 
   document.getElementById("lotSumQty").textContent = `${sumQty}주`;
   document.getElementById("lotSumCost").textContent = fmtUsd(sumCost);
-  document.getElementById("lotSumPnl").textContent = fmtUsd(sumPnl);
+  const lotPnlEl = document.getElementById("lotSumPnl");
+  lotPnlEl.textContent = fmtUsd(sumPnl);
+  lotPnlEl.className = sumPnl >= 0 ? "accent-green" : "accent-red";
 
-  tbody.querySelectorAll("input.cell-input").forEach((inp) => {
+  listEl.querySelectorAll("input.mini-input").forEach((inp) => {
     inp.addEventListener("change", (e) => {
       const idx = Number(e.target.dataset.lotIdx);
       const field = e.target.dataset.field;
@@ -538,7 +560,7 @@ function renderLots(m) {
     });
   });
 
-  tbody.querySelectorAll("button.btn-del").forEach((btn) => {
+  listEl.querySelectorAll("button.btn-del").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.lots.splice(Number(btn.dataset.delLot), 1);
       saveState();
@@ -547,46 +569,92 @@ function renderLots(m) {
   });
 }
 
-function renderJournal() {
-  const tbody = document.getElementById("journalBody");
-  tbody.innerHTML = "";
+function renderJournal(m) {
+  const listEl = document.getElementById("journalList");
+  listEl.innerHTML = "";
   const feeRate = (Number(state.config.feePct) || 0) / 100;
+
+  if (state.journal.length === 0) {
+    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">기록된 매매일지가 없습니다.</div>`;
+  }
 
   state.journal.forEach((row, idx) => {
     const pr = Number(row.price) || 0;
     const q = Number(row.qty) || 0;
     const refBp = Number(row.refBuyPrice) || 0;
+    const tradeAmt = pr * q;
     const pnl = row.side === "매도"
       ? (pr - refBp) * q - (pr * q + refBp * q) * feeRate
       : 0;
 
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td><input type="text" class="cell-input sm-date" data-j-idx="${idx}" data-field="date" value="${row.date}" /></td>
-      <td>
-        <select class="cell-input sm-id" data-j-idx="${idx}" data-field="tide">
-          <option value="썰물" ${row.tide === "썰물" ? "selected" : ""}>썰물</option>
-          <option value="밀물" ${row.tide === "밀물" ? "selected" : ""}>밀물</option>
-        </select>
-      </td>
-      <td>
-        <select class="cell-input sm-id" data-j-idx="${idx}" data-field="side">
-          <option value="매수" ${row.side === "매수" ? "selected" : ""}>매수</option>
-          <option value="매도" ${row.side === "매도" ? "selected" : ""}>매도</option>
-          <option value="등대매수" ${row.side === "등대매수" ? "selected" : ""}>등대</option>
-        </select>
-      </td>
-      <td><input type="text" class="cell-input sm-id" data-j-idx="${idx}" data-field="lotId" value="${row.lotId}" /></td>
-      <td><input type="number" step="0.01" class="cell-input" data-j-idx="${idx}" data-field="price" value="${pr.toFixed(2)}" /></td>
-      <td><input type="number" step="1" class="cell-input sm-qty" data-j-idx="${idx}" data-field="qty" value="${q}" /></td>
-      <td><input type="number" step="0.01" class="cell-input" data-j-idx="${idx}" data-field="refBuyPrice" value="${refBp.toFixed(2)}" /></td>
-      <td class="${row.side === "매도" ? (pnl >= 0 ? "accent-green" : "accent-red") : ""}">${row.side === "매도" ? fmtUsd(pnl) : "-"}</td>
-      <td><button class="btn-del" data-del-j="${idx}">삭제</button></td>
+    const sideClass = row.side === "매도" ? "side-sell" : (row.side === "등대매수" ? "side-beacon" : "side-buy");
+    const badgeColor = row.side === "매도" ? "accent-green" : (row.side === "등대매수" ? "accent-amber" : "accent-blue");
+
+    const card = document.createElement("div");
+    card.className = `order-row-card ${sideClass}`;
+    card.innerHTML = `
+      <div class="order-row-top">
+        <div class="order-row-title">
+          <span class="${badgeColor}">[${row.side}]</span>
+          <span>${row.lotId}</span>
+          <span class="muted-sm">· 체결액 ${fmtUsd(tradeAmt)}</span>
+        </div>
+        <div class="order-row-meta">
+          ${row.side === "매도"
+            ? `<span class="${pnl >= 0 ? "accent-green" : "accent-red"}"><strong>손익 ${fmtUsd(pnl)}</strong></span>`
+            : `<span class="muted-sm">${row.tide}</span>`
+          }
+          <button class="btn-del" data-del-j="${idx}">삭제</button>
+        </div>
+      </div>
+      <div class="order-fields-grid journal-top-grid">
+        <div class="mini-field">
+          <label>일자</label>
+          <input type="text" class="mini-input center" data-j-idx="${idx}" data-field="date" value="${row.date}" />
+        </div>
+        <div class="mini-field">
+          <label>물때</label>
+          <select class="mini-input center" data-j-idx="${idx}" data-field="tide">
+            <option value="썰물" ${row.tide === "썰물" ? "selected" : ""}>썰물</option>
+            <option value="밀물" ${row.tide === "밀물" ? "selected" : ""}>밀물</option>
+          </select>
+        </div>
+        <div class="mini-field">
+          <label>구분</label>
+          <select class="mini-input center" data-j-idx="${idx}" data-field="side">
+            <option value="매수" ${row.side === "매수" ? "selected" : ""}>매수</option>
+            <option value="매도" ${row.side === "매도" ? "selected" : ""}>매도</option>
+            <option value="등대매수" ${row.side === "등대매수" ? "selected" : ""}>등대</option>
+          </select>
+        </div>
+        <div class="mini-field">
+          <label>묶음ID</label>
+          <input type="text" class="mini-input center" data-j-idx="${idx}" data-field="lotId" value="${row.lotId}" />
+        </div>
+      </div>
+      <div class="order-fields-grid sell-grid">
+        <div class="mini-field">
+          <label>체결단가($)</label>
+          <input type="number" step="0.01" class="mini-input" data-j-idx="${idx}" data-field="price" value="${pr.toFixed(2)}" />
+        </div>
+        <div class="mini-field">
+          <label>체결수량(주)</label>
+          <input type="number" step="1" class="mini-input" data-j-idx="${idx}" data-field="qty" value="${q}" />
+        </div>
+        <div class="mini-field">
+          <label>기준매수가($)</label>
+          <input type="number" step="0.01" class="mini-input" data-j-idx="${idx}" data-field="refBuyPrice" value="${refBp.toFixed(2)}" />
+        </div>
+      </div>
     `;
-    tbody.appendChild(tr);
+    listEl.appendChild(card);
   });
 
-  tbody.querySelectorAll(".cell-input").forEach((el) => {
+  const totalPnlEl = document.getElementById("journalTotalPnl");
+  totalPnlEl.textContent = fmtUsd(m.realizedSum);
+  totalPnlEl.className = m.realizedSum >= 0 ? "accent-green" : "accent-red";
+
+  listEl.querySelectorAll(".mini-input").forEach((el) => {
     el.addEventListener("change", (e) => {
       const idx = Number(e.target.dataset.jIdx);
       const field = e.target.dataset.field;
@@ -600,7 +668,7 @@ function renderJournal() {
     });
   });
 
-  tbody.querySelectorAll("button.btn-del").forEach((btn) => {
+  listEl.querySelectorAll("button.btn-del").forEach((btn) => {
     btn.addEventListener("click", () => {
       state.journal.splice(Number(btn.dataset.delJ), 1);
       saveState();
@@ -669,7 +737,6 @@ function bindEvents() {
     });
   });
 
-  // TQQQ direct editing on LOC Order page
   document.getElementById("inpTqqqInvest").addEventListener("change", (e) => {
     const val = Number(e.target.value) || 0;
     state.config.beaconInvest = val;
@@ -693,7 +760,6 @@ function bindEvents() {
     renderAll();
   });
 
-  // Settings tab inputs
   document.getElementById("cfgTotalSeed").addEventListener("change", (e) => {
     const newTotal = Number(e.target.value) || 0;
     state.config.totalSeed = newTotal;
@@ -778,7 +844,6 @@ function bindEvents() {
     URL.revokeObjectURL(url);
   });
 
-  // Reset ALL values to 0
   document.getElementById("btnResetAll").addEventListener("click", () => {
     if (confirm("모든 설정값과 매매일지·묶음을 전부 0으로 초기화할까요?")) {
       state = structuredClone(ZERO_STATE);

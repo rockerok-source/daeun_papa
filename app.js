@@ -1,4 +1,4 @@
-const STORAGE_KEY = "soxl_loop_pwa_v4_state";
+const STORAGE_KEY = "soxl_loop_pwa_v5_state";
 
 function getTodayStr() {
   const now = new Date();
@@ -781,43 +781,105 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
-// 4. Yahoo Finance previous close auto-fetch via CORS-friendly JSON endpoints
-async function fetchYahooQuote(symbol) {
-  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`;
-  const endpoints = [
-    yahooUrl,
-    `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
-    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`
-  ];
+// 4. Yahoo Finance previous close auto-fetch via multi-source fallback (Naver WorldStock + Yahoo CORS proxies)
+function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  return fetch(url, { ...options, signal: controller.signal })
+    .finally(() => clearTimeout(id));
+}
 
-  for (const url of endpoints) {
+async function fetchFromNaverWorldStock(symbol) {
+  // Naver Finance mobile/worldstock API provides reliable CORS-enabled US ETF quotes (SOXL.O, TQQQ.O)
+  const urls = [
+    `https://api.stock.naver.com/etf/${symbol}.O/basic`,
+    `https://api.stock.naver.com/stock/${symbol}.O/basic`,
+    `https://api.stock.naver.com/etf/${symbol}/basic`
+  ];
+  for (const url of urls) {
     try {
-      const res = await fetch(url, { cache: "no-store" });
+      const res = await fetchWithTimeout(url, { cache: "no-store" }, 4500);
       if (!res.ok) continue;
       const data = await res.json();
-      const result = data?.chart?.result?.[0];
-      if (!result) continue;
-
-      const meta = result.meta || {};
-      const closes = (result.indicators?.quote?.[0]?.close || []).filter((v) => typeof v === "number" && !Number.isNaN(v));
-      let prevClose = null;
-
-      if (closes.length >= 2) {
-        // Use the most recent completed daily close
-        prevClose = closes[closes.length - 1];
-      } else if (typeof meta.regularMarketPrice === "number") {
-        prevClose = meta.regularMarketPrice;
-      } else if (typeof meta.chartPreviousClose === "number") {
-        prevClose = meta.chartPreviousClose;
+      const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice || data?.prevClosePrice;
+      if (rawPrice) {
+        const num = Number(String(rawPrice).replace(/,/g, ""));
+        if (!Number.isNaN(num) && num > 0) {
+          return { price: Number(num.toFixed(2)), source: "네이버/야후 시세" };
+        }
       }
-
-      if (prevClose && prevClose > 0) {
-        return Number(prevClose.toFixed(2));
-      }
-    } catch (err) {
-      // Try next fallback endpoint
+    } catch (e) {
+      // fallback to next source
     }
   }
+  return null;
+}
+
+async function fetchFromYahooEndpoints(symbol) {
+  const yahooUrls = [
+    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`,
+    `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`
+  ];
+
+  const proxyBuilders = [
+    (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
+    (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
+    (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
+    (u) => `https://thingproxy.freeboard.io/fetch/${u}`
+  ];
+
+  for (const yUrl of yahooUrls) {
+    for (const buildProxy of proxyBuilders) {
+      try {
+        const proxyUrl = buildProxy(yUrl);
+        const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 5500);
+        if (!res.ok) continue;
+
+        let data = await res.json();
+        // allorigins /get wraps response inside { contents: "..." }
+        if (data && typeof data.contents === "string") {
+          data = JSON.parse(data.contents);
+        }
+
+        const result = data?.chart?.result?.[0];
+        if (!result) continue;
+
+        const meta = result.meta || {};
+        const closes = (result.indicators?.quote?.[0]?.close || []).filter(
+          (v) => typeof v === "number" && !Number.isNaN(v) && v > 0
+        );
+
+        let prevClose = null;
+        if (closes.length >= 1) {
+          prevClose = closes[closes.length - 1];
+        } else if (typeof meta.regularMarketPrice === "number" && meta.regularMarketPrice > 0) {
+          prevClose = meta.regularMarketPrice;
+        } else if (typeof meta.chartPreviousClose === "number" && meta.chartPreviousClose > 0) {
+          prevClose = meta.chartPreviousClose;
+        }
+
+        if (prevClose && prevClose > 0) {
+          return { price: Number(prevClose.toFixed(2)), source: "야후 파이낸스" };
+        }
+      } catch (err) {
+        // Try next proxy
+      }
+    }
+  }
+  return null;
+}
+
+async function fetchSymbolQuote(symbol) {
+  // Race Yahoo proxies and Naver US ETF API in parallel for fastest response
+  const yahooPromise = fetchFromYahooEndpoints(symbol);
+  const naverPromise = fetchFromNaverWorldStock(symbol);
+
+  const yahooRes = await yahooPromise;
+  if (yahooRes) return yahooRes;
+
+  const naverRes = await naverPromise;
+  if (naverRes) return naverRes;
+
   return null;
 }
 
@@ -825,29 +887,30 @@ async function handleFetchYahooPrices() {
   const btn = document.getElementById("btnFetchYahoo");
   const statusEl = document.getElementById("yahooStatusText");
   btn.disabled = true;
-  btn.textContent = "⏳ 야후 파이낸스 조회 중...";
-  statusEl.textContent = "SOXL · TQQQ 시세 데이터를 가져오는 중입니다...";
+  btn.textContent = "⏳ 종가 데이터 조회 중...";
+  statusEl.textContent = "야후 파이낸스 및 해외ETF 시세 서버에서 SOXL · TQQQ 종가를 불러오는 중...";
 
-  const [soxlPrice, tqqqPrice] = await Promise.all([
-    fetchYahooQuote("SOXL"),
-    fetchYahooQuote("TQQQ")
+  const [soxlRes, tqqqRes] = await Promise.all([
+    fetchSymbolQuote("SOXL"),
+    fetchSymbolQuote("TQQQ")
   ]);
 
   btn.disabled = false;
   btn.textContent = "🔄 야후 파이낸스 전일 종가 자동조회";
 
-  if (soxlPrice || tqqqPrice) {
-    if (soxlPrice) state.orderInput.prevSoxl = soxlPrice;
-    if (tqqqPrice) state.orderInput.prevTqqq = tqqqPrice;
+  if (soxlRes || tqqqRes) {
+    if (soxlRes) state.orderInput.prevSoxl = soxlRes.price;
+    if (tqqqRes) state.orderInput.prevTqqq = tqqqRes.price;
     state.buyOverrides = {};
     saveState();
     renderAll();
     const nowTime = new Date().toTimeString().slice(0, 5);
-    statusEl.textContent = `야후 파이낸스 반영 완료 (${nowTime}) — SOXL $${(soxlPrice || state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${(tqqqPrice || state.orderInput.prevTqqq).toFixed(2)}`;
-    showToast("야후 파이낸스 종가 반영 완료");
+    const srcLabel = (soxlRes || tqqqRes).source;
+    statusEl.textContent = `${srcLabel} 반영 완료 (${nowTime}) — SOXL $${Number(state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${Number(state.orderInput.prevTqqq).toFixed(2)}`;
+    showToast("전일 종가 자동 반영 완료");
   } else {
-    statusEl.textContent = "네트워크 제한으로 자동 조회에 실패했습니다. 우측 SOXL·TQQQ 링크에서 확인 후 직접 입력해 주세요.";
-    showToast("자동 조회 실패 — 링크에서 확인 후 입력");
+    statusEl.textContent = "사파리 보안/광고차단 또는 일시적 서버 지연으로 조회되지 않았습니다. 우측 SOXL·TQQQ 링크에서 확인 후 입력해 주세요.";
+    showToast("자동 조회 실패 — 우측 링크에서 확인");
   }
 }
 

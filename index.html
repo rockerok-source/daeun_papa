@@ -23,10 +23,14 @@
         </div>
       </div>
       <div class="top-actions">
-        <button class="btn-ghost" id="btnExportJson" title="백업 내보내기">백업</button>
+        <button class="btn-save" id="btnSaveAll" title="현재 내용 저장">저장</button>
+        <button class="btn-ghost" id="btnExportJson" title="JSON 백업 내보내기">백업</button>
         <button class="btn-ghost btn-danger-ghost" id="btnResetAll" title="0으로 초기화">초기화</button>
       </div>
     </header>
+
+    <!-- Toast Notification -->
+    <div class="toast" id="toastMsg">저장되었습니다.</div>
 
     <!-- KPI Strip -->
     <section class="kpi-grid" id="kpiStrip">
@@ -61,18 +65,24 @@
             <h2>오늘의 시장 기준 & LOC 설정</h2>
             <span class="pill" id="tideBadge">썰물 모드</span>
           </div>
-          <div class="form-grid-2">
+          <div class="form-grid-3 mb-8">
             <label class="field">
-              <span>기준 날짜</span>
+              <span>기준 날짜 (오늘 자동)</span>
               <input type="date" id="inpOrderDate" />
             </label>
             <label class="field">
               <span>오늘의 물때</span>
               <select id="selTide">
-                <option value="썰물">썰물 (하락 · 2.5배)</option>
-                <option value="밀물">밀물 (상승 · 1.0배)</option>
+                <option value="썰물">썰물 (하락)</option>
+                <option value="밀물">밀물 (상승)</option>
               </select>
             </label>
+            <label class="field">
+              <span id="lblActiveMult">썰물 하락 배수(배)</span>
+              <input type="number" step="0.1" id="inpOrderMult" />
+            </label>
+          </div>
+          <div class="form-grid-2">
             <label class="field">
               <span>SOXL 전일 종가 ($)</span>
               <input type="number" step="0.01" id="inpPrevSoxl" />
@@ -82,6 +92,15 @@
               <input type="number" step="0.01" id="inpPrevTqqq" />
             </label>
           </div>
+          <div class="yahoo-bar">
+            <button class="btn-yahoo" id="btnFetchYahoo">🔄 야후 파이낸스 전일 종가 자동조회</button>
+            <div class="yahoo-links">
+              <a href="https://finance.yahoo.com/quote/SOXL" target="_blank" rel="noopener">SOXL</a>
+              <span>·</span>
+              <a href="https://finance.yahoo.com/quote/TQQQ" target="_blank" rel="noopener">TQQQ</a>
+            </div>
+          </div>
+          <div class="muted-sm mt-4" id="yahooStatusText" style="text-align:center;">버튼을 누르면 SOXL·TQQQ 전일 종가를 자동 불러옵니다.</div>
 
           <div class="status-banner" id="cashStatusBanner">
             <span id="cashCheckText">최대 매수 예약 합계 확인 중...</span>
@@ -93,12 +112,12 @@
         <div class="card">
           <div class="card-head">
             <h2>등대(TQQQ) 투자금 · 매수 단가/수량</h2>
-            <span class="muted-sm">직접 수정 가능</span>
+            <span class="muted-sm">단가×수량 자동계산</span>
           </div>
           <div class="form-grid-3">
             <label class="field">
               <span>TQQQ 총 투자금($)</span>
-              <input type="number" step="10" id="inpTqqqInvest" />
+              <input type="number" step="0.01" id="inpTqqqInvest" />
             </label>
             <label class="field">
               <span>TQQQ 매수 단가($)</span>
@@ -110,15 +129,15 @@
             </label>
           </div>
           <div class="tqqq-summary-line" id="tqqqSummaryLine">
-            실투자원금: $0.00 · 현재평가금: $0.00 · 평가손익: $0.00
+            실매수원금: $0.00 · 현재평가금: $0.00 · 평가손익: $0.00
           </div>
         </div>
 
-        <!-- LOC 매수 주문표 (한 화면 최적화) -->
+        <!-- LOC 매수 주문표 (그물추 단계 추가/삭제 가능) -->
         <div class="card card-tight">
           <div class="card-head">
-            <h2>LOC 매수 주문표 (그물 + 8단계 그물추)</h2>
-            <span class="muted-sm">등락률·가격·액수·수량 수정</span>
+            <h2>LOC 매수 주문표 (그물 + 그물추)</h2>
+            <button class="btn-primary sm" id="btnAddSink">+ 그물추 추가</button>
           </div>
           <div class="order-list" id="buyOrderList"></div>
           <div class="order-total-bar">
@@ -131,11 +150,11 @@
           </div>
         </div>
 
-        <!-- LOC 익절 매도 주문표 (한 화면 최적화 + 삭제 버튼) -->
+        <!-- LOC 익절 매도 주문표 (익절 버튼 클릭 시에만 실현손익 반영) -->
         <div class="card card-tight">
           <div class="card-head">
             <h2>LOC 익절 매도 주문표 (저가 우선)</h2>
-            <span class="muted-sm">목표가·수량 수정 / 삭제</span>
+            <span class="muted-sm">익절 체결 시에만 손익 반영</span>
           </div>
           <div class="order-list" id="sellOrderList"></div>
         </div>
@@ -161,14 +180,14 @@
         </div>
       </section>
 
-      <!-- TAB 3: 매매일지 (좌우 스크롤 없는 한 화면 카드 레이아웃) -->
+      <!-- TAB 3: 매매일지 -->
       <section class="tab-panel" id="tab-journal">
         <div class="card card-tight">
           <div class="card-head">
             <h2>실전 매수·매도 일지</h2>
             <button class="btn-primary sm" id="btnAddJournal">+ 체결 추가</button>
           </div>
-          <p class="muted-sm mb-10" style="padding:0 2px;">일자·물때·구분·체결가·수량·기준매수가를 한 화면에서 바로 수정하고 실현손익을 확인하세요.</p>
+          <p class="muted-sm mb-10" style="padding:0 2px;">실제 '매도' 처리된 건만 복리 총자산의 누적 실현손익에 합산됩니다.</p>
           <div class="order-list" id="journalList"></div>
           <div class="order-total-bar">
             <span>누적 실현손익 (수수료 차감)</span>
@@ -191,7 +210,7 @@
             </label>
             <label class="field">
               <span>등대(TQQQ) 총 투자금 ($)</span>
-              <input type="number" step="10" id="cfgBeaconInvest" />
+              <input type="number" step="0.01" id="cfgBeaconInvest" />
             </label>
             <label class="field">
               <span>등대(TQQQ) 목표 비중 (%)</span>
@@ -206,6 +225,10 @@
               <input type="number" step="0.1" id="cfgEbbMult" />
             </label>
             <label class="field">
+              <span>밀물 매수 배수 (배)</span>
+              <input type="number" step="0.1" id="cfgFloodMult" />
+            </label>
+            <label class="field">
               <span>목표 익절 수익률 (%)</span>
               <input type="number" step="0.1" id="cfgTargetPct" />
             </label>
@@ -213,7 +236,7 @@
               <span>편도 수수료율 (%)</span>
               <input type="number" step="0.01" id="cfgFeePct" />
             </label>
-            <label class="field">
+            <label class="field full-span">
               <span>복리 시드 자동 연동</span>
               <select id="cfgCompound">
                 <option value="Y">Y — 실현손익 합산 증액</option>

@@ -1,4 +1,24 @@
-const STORAGE_KEY = "soxl_loop_pwa_v3_state";
+const STORAGE_KEY = "soxl_loop_pwa_v4_state";
+
+function getTodayStr() {
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, "0");
+  const d = String(now.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
+const DEFAULT_LADDER = [
+  { id: "net-0", name: "그물(-$0.01)", isNet: true, dropPct: 0, weightUnits: 16, useFullUnit: true },
+  { id: "sink-1", name: "그물추 1단계", isNet: false, dropPct: -6.25, weightUnits: 1, useFullUnit: false },
+  { id: "sink-2", name: "그물추 2단계", isNet: false, dropPct: -12.50, weightUnits: 1, useFullUnit: false },
+  { id: "sink-3", name: "그물추 3단계", isNet: false, dropPct: -18.75, weightUnits: 1, useFullUnit: false },
+  { id: "sink-4", name: "그물추 4단계", isNet: false, dropPct: -25.00, weightUnits: 2, useFullUnit: false },
+  { id: "sink-5", name: "그물추 5단계", isNet: false, dropPct: -31.25, weightUnits: 2, useFullUnit: false },
+  { id: "sink-6", name: "그물추 6단계", isNet: false, dropPct: -37.50, weightUnits: 2, useFullUnit: false },
+  { id: "sink-7", name: "그물추 7단계", isNet: false, dropPct: -43.75, weightUnits: 3, useFullUnit: false },
+  { id: "sink-8", name: "그물추 8단계", isNet: false, dropPct: -50.00, weightUnits: 4, useFullUnit: false }
+];
 
 const DEFAULT_STATE = {
   config: {
@@ -7,6 +27,7 @@ const DEFAULT_STATE = {
     beaconPct: 10,
     divisions: 18,
     ebbMult: 2.5,
+    floodMult: 1.0,
     targetPct: 2.5,
     feePct: 0.07,
     compound: "Y",
@@ -14,28 +35,20 @@ const DEFAULT_STATE = {
     rebSoxlVal: 9650
   },
   tqqq: {
-    buyPrice: 68.21,
+    buyPrice: 62.50,
     qty: 16
   },
   orderInput: {
-    date: "2026-11-02",
+    date: getTodayStr(),
     tide: "썰물",
     prevSoxl: 77.05,
     prevTqqq: 62.01
   },
+  ladder: structuredClone(DEFAULT_LADDER),
   buyOverrides: {},
   sellOverrides: {},
-  lots: [
-    { id: "LP-03", date: "2026-11-06", buyPrice: 76.20, qty: 6 }
-  ],
-  journal: [
-    { date: "2026-11-02", tide: "썰물", side: "등대매수", lotId: "LT-00", price: 68.21, qty: 16, refBuyPrice: 68.21 },
-    { date: "2026-11-02", tide: "썰물", side: "매수", lotId: "LP-01", price: 75.50, qty: 16, refBuyPrice: 75.50 },
-    { date: "2026-11-03", tide: "썰물", side: "매수", lotId: "LP-02", price: 70.80, qty: 17, refBuyPrice: 70.80 },
-    { date: "2026-11-04", tide: "썰물", side: "매도", lotId: "LP-02", price: 72.70, qty: 17, refBuyPrice: 70.80 },
-    { date: "2026-11-05", tide: "밀물", side: "매도", lotId: "LP-01", price: 77.50, qty: 16, refBuyPrice: 75.50 },
-    { date: "2026-11-06", tide: "밀물", side: "매수", lotId: "LP-03", price: 76.20, qty: 6, refBuyPrice: 76.20 }
-  ]
+  lots: [],
+  journal: []
 };
 
 const ZERO_STATE = {
@@ -45,6 +58,7 @@ const ZERO_STATE = {
     beaconPct: 0,
     divisions: 0,
     ebbMult: 0,
+    floodMult: 0,
     targetPct: 0,
     feePct: 0,
     compound: "Y",
@@ -56,54 +70,66 @@ const ZERO_STATE = {
     qty: 0
   },
   orderInput: {
-    date: new Date().toISOString().slice(0, 10),
+    date: getTodayStr(),
     tide: "썰물",
     prevSoxl: 0,
     prevTqqq: 0
   },
+  ladder: structuredClone(DEFAULT_LADDER),
   buyOverrides: {},
   sellOverrides: {},
   lots: [],
   journal: []
 };
 
-const LADDER_SPEC = [
-  { name: "그물(-$0.01)", isNet: true, defaultDropPct: 0, weightFrac: 1.0 },
-  { name: "그물추 1단계", isNet: false, defaultDropPct: -6.25, weightFrac: 1 / 16 },
-  { name: "그물추 2단계", isNet: false, defaultDropPct: -12.50, weightFrac: 1 / 16 },
-  { name: "그물추 3단계", isNet: false, defaultDropPct: -18.75, weightFrac: 1 / 16 },
-  { name: "그물추 4단계", isNet: false, defaultDropPct: -25.00, weightFrac: 2 / 16 },
-  { name: "그물추 5단계", isNet: false, defaultDropPct: -31.25, weightFrac: 2 / 16 },
-  { name: "그물추 6단계", isNet: false, defaultDropPct: -37.50, weightFrac: 2 / 16 },
-  { name: "그물추 7단계", isNet: false, defaultDropPct: -43.75, weightFrac: 3 / 16 },
-  { name: "그물추 8단계", isNet: false, defaultDropPct: -50.00, weightFrac: 4 / 16 }
-];
-
 let state = loadState();
 
 function loadState() {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return structuredClone(DEFAULT_STATE);
+    if (!raw) {
+      const init = structuredClone(DEFAULT_STATE);
+      init.orderInput.date = getTodayStr();
+      return init;
+    }
     const parsed = JSON.parse(raw);
-    return {
+    const merged = {
       ...structuredClone(DEFAULT_STATE),
       ...parsed,
       config: { ...DEFAULT_STATE.config, ...(parsed.config || {}) },
       tqqq: { ...DEFAULT_STATE.tqqq, ...(parsed.tqqq || {}) },
       orderInput: { ...DEFAULT_STATE.orderInput, ...(parsed.orderInput || {}) },
+      ladder: Array.isArray(parsed.ladder) && parsed.ladder.length > 0 ? parsed.ladder : structuredClone(DEFAULT_LADDER),
       buyOverrides: parsed.buyOverrides || {},
       sellOverrides: parsed.sellOverrides || {},
       lots: Array.isArray(parsed.lots) ? parsed.lots : [],
       journal: Array.isArray(parsed.journal) ? parsed.journal : []
     };
+    if (!merged.orderInput.date) {
+      merged.orderInput.date = getTodayStr();
+    }
+    return merged;
   } catch (e) {
     return structuredClone(DEFAULT_STATE);
   }
 }
 
-function saveState() {
+function saveState(showToastMsg = false) {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+  if (showToastMsg) {
+    showToast("모든 수치와 변경사항이 저장되었습니다.");
+  }
+}
+
+function showToast(msg) {
+  const el = document.getElementById("toastMsg");
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.add("show");
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => {
+    el.classList.remove("show");
+  }, 2000);
 }
 
 function fmtUsd(n) {
@@ -119,6 +145,7 @@ function calcMetrics() {
   const soxlInit = Math.max(0, totalSeed - beaconInvest);
   const feeRate = (Number(cfg.feePct) || 0) / 100;
 
+  // 3. Only actual "매도" records in journal count toward realized PnL!
   let realizedSum = 0;
   state.journal.forEach((row) => {
     if (row.side === "매도") {
@@ -132,9 +159,12 @@ function calcMetrics() {
   const soxlTotalAsset = soxlInit + realizedSum;
   const baseForUnit = cfg.compound === "Y" ? soxlTotalAsset : soxlInit;
   const divs = Number(cfg.divisions) || 0;
-  const floodUnit = divs > 0 ? baseForUnit / divs : 0;
-  const ebbUnit = floodUnit * (Number(cfg.ebbMult) || 0);
-  const activeUnit = state.orderInput.tide === "밀물" ? floodUnit : ebbUnit;
+  const baseDivAmt = divs > 0 ? baseForUnit / divs : 0;
+
+  const ebbMult = Number(cfg.ebbMult) || 0;
+  const floodMult = Number(cfg.floodMult) || 0;
+  const activeMult = state.orderInput.tide === "밀물" ? floodMult : ebbMult;
+  const activeUnit = baseDivAmt * activeMult;
 
   let openCost = 0;
   let openQty = 0;
@@ -151,9 +181,10 @@ function calcMetrics() {
 
   const cashBalance = soxlTotalAsset - openCost;
 
+  // 5. TQQQ auto calculation from buyPrice * qty
   const tqqqBuyPrice = Number(state.tqqq.buyPrice) || 0;
   const tqqqQty = Number(state.tqqq.qty) || 0;
-  const tqqqActualCost = tqqqBuyPrice * tqqqQty;
+  const tqqqActualCost = Number((tqqqBuyPrice * tqqqQty).toFixed(2));
   const prevTqqq = Number(state.orderInput.prevTqqq) || 0;
   const tqqqEvalVal = prevTqqq > 0 ? prevTqqq * tqqqQty : tqqqActualCost;
   const tqqqPnl = tqqqEvalVal - tqqqActualCost;
@@ -167,8 +198,10 @@ function calcMetrics() {
     soxlInit,
     realizedSum,
     soxlTotalAsset,
-    floodUnit,
-    ebbUnit,
+    baseDivAmt,
+    ebbMult,
+    floodMult,
+    activeMult,
     activeUnit,
     openCost,
     openQty,
@@ -190,35 +223,40 @@ function renderAll() {
   const oi = state.orderInput;
 
   document.getElementById("headerSummary").textContent =
-    `총시드 ${fmtUsd(m.totalSeed)} · 배 ${cfg.divisions}칸 · ${oi.tide} ×${oi.tide === "썰물" ? cfg.ebbMult : 1}`;
+    `총시드 ${fmtUsd(m.totalSeed)} · 배 ${cfg.divisions}칸 · ${oi.tide} ×${m.activeMult}`;
 
   document.getElementById("kpiSoxlTotal").textContent = fmtUsd(m.soxlTotalAsset);
   const relEl = document.getElementById("kpiRealized");
   relEl.textContent = `실현손익: ${fmtUsd(m.realizedSum)}`;
-  relEl.className = `kpi-hint ${m.realizedSum >= 0 ? "accent-green" : "accent-red"}`;
+  relEl.className = `kpi-hint ${m.realizedSum > 0 ? "accent-green" : (m.realizedSum < 0 ? "accent-red" : "")}`;
 
   document.getElementById("kpiCash").textContent = fmtUsd(m.cashBalance);
   document.getElementById("kpiLotsCost").textContent = `보유원금: ${fmtUsd(m.openCost)} (${m.openQty}주)`;
 
   document.getElementById("kpiUnitAmt").textContent = fmtUsd(m.activeUnit);
-  document.getElementById("kpiUnitHint").textContent = `${oi.tide} 기준 (밀물 ${fmtUsd(m.floodUnit)})`;
+  document.getElementById("kpiUnitHint").textContent = `${oi.tide} ×${m.activeMult} (1칸 ${fmtUsd(m.baseDivAmt)})`;
 
   document.getElementById("kpiBeaconRatio").textContent = `${fmtUsd(m.beaconInvest)} (${m.beaconRatio.toFixed(1)}%)`;
   document.getElementById("kpiBeaconVal").textContent = `매수 $${m.tqqqBuyPrice.toFixed(2)} · ${m.tqqqQty}주`;
 
+  // Order Inputs
   document.getElementById("inpOrderDate").value = oi.date;
   document.getElementById("selTide").value = oi.tide;
+  document.getElementById("lblActiveMult").textContent =
+    oi.tide === "썰물" ? "썰물 하락 배수(배)" : "밀물 상승 배수(배)";
+  document.getElementById("inpOrderMult").value = m.activeMult;
   document.getElementById("inpPrevSoxl").value = oi.prevSoxl;
   document.getElementById("inpPrevTqqq").value = oi.prevTqqq;
 
+  // TQQQ Inputs
   document.getElementById("inpTqqqInvest").value = m.beaconInvest;
   document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice;
   document.getElementById("inpTqqqQty").value = m.tqqqQty;
   document.getElementById("tqqqSummaryLine").innerHTML =
-    `실매수원금: <strong>${fmtUsd(m.tqqqActualCost)}</strong> · 현재평가금: <strong>${fmtUsd(m.tqqqEvalVal)}</strong> · 손익: <strong class="${m.tqqqPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(m.tqqqPnl)}</strong>`;
+    `자동계산 원금: <strong>${fmtUsd(m.tqqqActualCost)}</strong> · 현재평가금: <strong>${fmtUsd(m.tqqqEvalVal)}</strong> · 손익: <strong class="${m.tqqqPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(m.tqqqPnl)}</strong>`;
 
   const tideBadge = document.getElementById("tideBadge");
-  tideBadge.textContent = `${oi.tide} 모드`;
+  tideBadge.textContent = `${oi.tide} ×${m.activeMult}`;
   tideBadge.className = oi.tide === "썰물" ? "pill ebb" : "pill";
 
   renderBuyOrders(m);
@@ -234,16 +272,20 @@ function renderBuyOrders(m) {
   const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
   const feeRate = (Number(state.config.feePct) || 0) / 100;
 
+  // Calculate dynamic weight denominator across all non-net sinker stages
+  const sinkRows = state.ladder.filter((item) => !item.isNet);
+  const totalSinkWeight = sinkRows.reduce((acc, item) => acc + (Number(item.weightUnits) || 1), 0) || 1;
+
   let sumAlloc = 0;
   let sumQty = 0;
   let sumEst = 0;
 
-  LADDER_SPEC.forEach((spec, idx) => {
-    const ov = state.buyOverrides[idx] || {};
+  state.ladder.forEach((spec, idx) => {
+    const ov = state.buyOverrides[spec.id] || {};
 
     const defaultDropPct = spec.isNet
       ? (prevSoxl > 0 ? Number(((-0.01 / prevSoxl) * 100).toFixed(2)) : 0)
-      : spec.defaultDropPct;
+      : Number(spec.dropPct);
     const dropPct = ov.dropPct !== undefined ? Number(ov.dropPct) : defaultDropPct;
 
     const defaultPrice = spec.isNet && ov.dropPct === undefined
@@ -251,7 +293,8 @@ function renderBuyOrders(m) {
       : Number(Math.max(0, prevSoxl * (1 + dropPct / 100)).toFixed(2));
     const price = ov.price !== undefined ? Number(ov.price) : defaultPrice;
 
-    const defaultAlloc = Number((m.activeUnit * spec.weightFrac).toFixed(2));
+    const frac = spec.useFullUnit ? 1.0 : ((Number(spec.weightUnits) || 1) / totalSinkWeight);
+    const defaultAlloc = Number((m.activeUnit * frac).toFixed(2));
     const alloc = ov.alloc !== undefined ? Number(ov.alloc) : defaultAlloc;
 
     const defaultQty = price > 0
@@ -273,25 +316,26 @@ function renderBuyOrders(m) {
         </div>
         <div class="order-row-meta">
           <span class="muted-sm">예상 ${fmtUsd(estAmt)}</span>
-          <button class="btn-exec" data-exec-buy="${idx}" data-price="${price}" data-qty="${qty}">체결</button>
+          <button class="btn-exec" data-exec-buy="${spec.id}" data-price="${price}" data-qty="${qty}">체결</button>
+          ${!spec.isNet ? `<button class="btn-del" data-del-sink="${idx}">삭제</button>` : ""}
         </div>
       </div>
       <div class="order-fields-grid">
         <div class="mini-field">
           <label>등락률(%)</label>
-          <input type="number" step="0.01" class="mini-input" data-buy-idx="${idx}" data-field="dropPct" value="${dropPct}" />
+          <input type="number" step="0.01" class="mini-input" data-buy-id="${spec.id}" data-idx="${idx}" data-field="dropPct" value="${dropPct}" />
         </div>
         <div class="mini-field">
           <label>LOC 지정가($)</label>
-          <input type="number" step="0.01" class="mini-input" data-buy-idx="${idx}" data-field="price" value="${price.toFixed(2)}" />
+          <input type="number" step="0.01" class="mini-input" data-buy-id="${spec.id}" data-idx="${idx}" data-field="price" value="${price.toFixed(2)}" />
         </div>
         <div class="mini-field">
           <label>배정액($)</label>
-          <input type="number" step="1" class="mini-input" data-buy-idx="${idx}" data-field="alloc" value="${alloc.toFixed(2)}" />
+          <input type="number" step="1" class="mini-input" data-buy-id="${spec.id}" data-idx="${idx}" data-field="alloc" value="${alloc.toFixed(2)}" />
         </div>
         <div class="mini-field">
           <label>수량(주)</label>
-          <input type="number" step="1" class="mini-input" data-buy-idx="${idx}" data-field="qty" value="${qty}" />
+          <input type="number" step="1" class="mini-input" data-buy-id="${spec.id}" data-idx="${idx}" data-field="qty" value="${qty}" />
         </div>
       </div>
     `;
@@ -317,19 +361,23 @@ function renderBuyOrders(m) {
 
   listEl.querySelectorAll("input.mini-input").forEach((inp) => {
     inp.addEventListener("change", (e) => {
-      const idx = Number(e.target.dataset.buyIdx);
+      const id = e.target.dataset.buyId;
+      const idx = Number(e.target.dataset.idx);
       const field = e.target.dataset.field;
       const val = Number(e.target.value) || 0;
-      const curOv = { ...(state.buyOverrides[idx] || {}) };
+      const curOv = { ...(state.buyOverrides[id] || {}) };
 
       if (field === "dropPct") {
         curOv.dropPct = val;
+        if (state.ladder[idx]) state.ladder[idx].dropPct = val;
         delete curOv.price;
         delete curOv.qty;
       } else if (field === "price") {
         curOv.price = val;
         if (prevSoxl > 0) {
-          curOv.dropPct = Number((((val - prevSoxl) / prevSoxl) * 100).toFixed(2));
+          const calcPct = Number((((val - prevSoxl) / prevSoxl) * 100).toFixed(2));
+          curOv.dropPct = calcPct;
+          if (state.ladder[idx]) state.ladder[idx].dropPct = calcPct;
         }
         delete curOv.qty;
       } else if (field === "alloc") {
@@ -339,7 +387,7 @@ function renderBuyOrders(m) {
         curOv.qty = Math.max(0, Math.floor(val));
       }
 
-      state.buyOverrides[idx] = curOv;
+      state.buyOverrides[id] = curOv;
       saveState();
       renderAll();
     });
@@ -357,6 +405,27 @@ function renderBuyOrders(m) {
 
       state.lots.push({ id: lotId, date: dt, buyPrice: price, qty });
       state.journal.push({ date: dt, tide: td, side: "매수", lotId, price, qty, refBuyPrice: price });
+      saveState();
+      renderAll();
+      showToast(`${lotId} 매수 체결 등록 완료`);
+    });
+  });
+
+  listEl.querySelectorAll("button.btn-del").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      const idx = Number(btn.dataset.delSink);
+      const removed = state.ladder.splice(idx, 1)[0];
+      if (removed) {
+        delete state.buyOverrides[removed.id];
+      }
+      // Re-number remaining sinker stages cleanly
+      let sinkNum = 1;
+      state.ladder.forEach((item) => {
+        if (!item.isNet) {
+          item.name = `그물추 ${sinkNum}단계`;
+          sinkNum += 1;
+        }
+      });
       saveState();
       renderAll();
     });
@@ -377,7 +446,7 @@ function renderSellOrders(m) {
   });
 
   if (state.lots.length === 0) {
-    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">미청산 보유 묶음이 없습니다.</div>`;
+    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">미청산 보유 묶음이 없습니다. 매수 체결 후 여기에 표시됩니다.</div>`;
     return;
   }
 
@@ -404,7 +473,7 @@ function renderSellOrders(m) {
           <span class="muted-sm">(매수 ${fmtUsd(buyPrice)})</span>
         </div>
         <div class="order-row-meta">
-          <span class="${estNetPnl >= 0 ? "accent-green" : "accent-red"}"><strong>${fmtUsd(estNetPnl)}</strong></span>
+          <span class="muted-sm">예상 <strong class="${estNetPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(estNetPnl)}</strong></span>
           <button class="btn-exec" data-exec-sell="${idx}" data-price="${targetPrice}" data-qty="${sellQty}">익절</button>
           <button class="btn-del" data-del-sell-lot="${idx}">삭제</button>
         </div>
@@ -469,6 +538,7 @@ function renderSellOrders(m) {
       state.sellOverrides = {};
       saveState();
       renderAll();
+      showToast(`${lot.id} 익절 매도 확정 (실현손익 반영)`);
     });
   });
 
@@ -652,7 +722,7 @@ function renderJournal(m) {
 
   const totalPnlEl = document.getElementById("journalTotalPnl");
   totalPnlEl.textContent = fmtUsd(m.realizedSum);
-  totalPnlEl.className = m.realizedSum >= 0 ? "accent-green" : "accent-red";
+  totalPnlEl.className = m.realizedSum > 0 ? "accent-green" : (m.realizedSum < 0 ? "accent-red" : "");
 
   listEl.querySelectorAll(".mini-input").forEach((el) => {
     el.addEventListener("change", (e) => {
@@ -684,6 +754,7 @@ function renderSettingsAndRebal(m) {
   document.getElementById("cfgBeaconPct").value = cfg.beaconPct;
   document.getElementById("cfgDivisions").value = cfg.divisions;
   document.getElementById("cfgEbbMult").value = cfg.ebbMult;
+  document.getElementById("cfgFloodMult").value = cfg.floodMult;
   document.getElementById("cfgTargetPct").value = cfg.targetPct;
   document.getElementById("cfgFeePct").value = cfg.feePct;
   document.getElementById("cfgCompound").value = cfg.compound;
@@ -710,6 +781,87 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
+// 4. Yahoo Finance previous close auto-fetch via CORS-friendly JSON endpoints
+async function fetchYahooQuote(symbol) {
+  const yahooUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d`;
+  const endpoints = [
+    yahooUrl,
+    `https://api.allorigins.win/raw?url=${encodeURIComponent(yahooUrl)}`,
+    `https://corsproxy.io/?${encodeURIComponent(yahooUrl)}`
+  ];
+
+  for (const url of endpoints) {
+    try {
+      const res = await fetch(url, { cache: "no-store" });
+      if (!res.ok) continue;
+      const data = await res.json();
+      const result = data?.chart?.result?.[0];
+      if (!result) continue;
+
+      const meta = result.meta || {};
+      const closes = (result.indicators?.quote?.[0]?.close || []).filter((v) => typeof v === "number" && !Number.isNaN(v));
+      let prevClose = null;
+
+      if (closes.length >= 2) {
+        // Use the most recent completed daily close
+        prevClose = closes[closes.length - 1];
+      } else if (typeof meta.regularMarketPrice === "number") {
+        prevClose = meta.regularMarketPrice;
+      } else if (typeof meta.chartPreviousClose === "number") {
+        prevClose = meta.chartPreviousClose;
+      }
+
+      if (prevClose && prevClose > 0) {
+        return Number(prevClose.toFixed(2));
+      }
+    } catch (err) {
+      // Try next fallback endpoint
+    }
+  }
+  return null;
+}
+
+async function handleFetchYahooPrices() {
+  const btn = document.getElementById("btnFetchYahoo");
+  const statusEl = document.getElementById("yahooStatusText");
+  btn.disabled = true;
+  btn.textContent = "⏳ 야후 파이낸스 조회 중...";
+  statusEl.textContent = "SOXL · TQQQ 시세 데이터를 가져오는 중입니다...";
+
+  const [soxlPrice, tqqqPrice] = await Promise.all([
+    fetchYahooQuote("SOXL"),
+    fetchYahooQuote("TQQQ")
+  ]);
+
+  btn.disabled = false;
+  btn.textContent = "🔄 야후 파이낸스 전일 종가 자동조회";
+
+  if (soxlPrice || tqqqPrice) {
+    if (soxlPrice) state.orderInput.prevSoxl = soxlPrice;
+    if (tqqqPrice) state.orderInput.prevTqqq = tqqqPrice;
+    state.buyOverrides = {};
+    saveState();
+    renderAll();
+    const nowTime = new Date().toTimeString().slice(0, 5);
+    statusEl.textContent = `야후 파이낸스 반영 완료 (${nowTime}) — SOXL $${(soxlPrice || state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${(tqqqPrice || state.orderInput.prevTqqq).toFixed(2)}`;
+    showToast("야후 파이낸스 종가 반영 완료");
+  } else {
+    statusEl.textContent = "네트워크 제한으로 자동 조회에 실패했습니다. 우측 SOXL·TQQQ 링크에서 확인 후 직접 입력해 주세요.";
+    showToast("자동 조회 실패 — 링크에서 확인 후 입력");
+  }
+}
+
+function syncTqqqInvestFromPriceQty() {
+  const bp = Number(state.tqqq.buyPrice) || 0;
+  const qty = Number(state.tqqq.qty) || 0;
+  const totalTqqq = Number((bp * qty).toFixed(2));
+  state.config.beaconInvest = totalTqqq;
+  if ((Number(state.config.totalSeed) || 0) > 0) {
+    state.config.beaconPct = Number(((totalTqqq / Number(state.config.totalSeed)) * 100).toFixed(2));
+  }
+  state.buyOverrides = {};
+}
+
 function bindEvents() {
   document.querySelectorAll(".nav-btn").forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -720,23 +872,76 @@ function bindEvents() {
     });
   });
 
-  const orderMap = [
-    ["inpOrderDate", "date", "str"],
-    ["selTide", "tide", "str"],
-    ["inpPrevSoxl", "prevSoxl", "num"],
-    ["inpPrevTqqq", "prevTqqq", "num"]
-  ];
-  orderMap.forEach(([id, key, typ]) => {
-    document.getElementById(id).addEventListener("change", (e) => {
-      state.orderInput[key] = typ === "num" ? (Number(e.target.value) || 0) : e.target.value;
-      if (key === "prevSoxl" || key === "tide") {
-        state.buyOverrides = {};
-      }
-      saveState();
-      renderAll();
-    });
+  // 7. Top Save Button
+  document.getElementById("btnSaveAll").addEventListener("click", () => {
+    saveState(true);
+    renderAll();
   });
 
+  // 4. Yahoo Finance button
+  document.getElementById("btnFetchYahoo").addEventListener("click", handleFetchYahooPrices);
+
+  // 1. Add sinker stage button
+  document.getElementById("btnAddSink").addEventListener("click", () => {
+    const sinkRows = state.ladder.filter((item) => !item.isNet);
+    const nextStageNum = sinkRows.length + 1;
+    const lastDrop = sinkRows.length > 0 ? Number(sinkRows[sinkRows.length - 1].dropPct) : 0;
+    const nextDrop = Number((lastDrop - 6.25).toFixed(2));
+
+    state.ladder.push({
+      id: `sink-${Date.now()}`,
+      name: `그물추 ${nextStageNum}단계`,
+      isNet: false,
+      dropPct: nextDrop,
+      weightUnits: 2,
+      useFullUnit: false
+    });
+    saveState();
+    renderAll();
+    showToast(`그물추 ${nextStageNum}단계 추가됨`);
+  });
+
+  // Order criteria inputs
+  document.getElementById("inpOrderDate").addEventListener("change", (e) => {
+    state.orderInput.date = e.target.value || getTodayStr();
+    saveState();
+    renderAll();
+  });
+
+  document.getElementById("selTide").addEventListener("change", (e) => {
+    state.orderInput.tide = e.target.value;
+    state.buyOverrides = {};
+    saveState();
+    renderAll();
+  });
+
+  // 6. Editable tide multiplier directly on LOC Order page
+  document.getElementById("inpOrderMult").addEventListener("change", (e) => {
+    const val = Number(e.target.value) || 0;
+    if (state.orderInput.tide === "썰물") {
+      state.config.ebbMult = val;
+    } else {
+      state.config.floodMult = val;
+    }
+    state.buyOverrides = {};
+    saveState();
+    renderAll();
+  });
+
+  document.getElementById("inpPrevSoxl").addEventListener("change", (e) => {
+    state.orderInput.prevSoxl = Number(e.target.value) || 0;
+    state.buyOverrides = {};
+    saveState();
+    renderAll();
+  });
+
+  document.getElementById("inpPrevTqqq").addEventListener("change", (e) => {
+    state.orderInput.prevTqqq = Number(e.target.value) || 0;
+    saveState();
+    renderAll();
+  });
+
+  // 5. TQQQ auto-calculation when buyPrice or qty changes
   document.getElementById("inpTqqqInvest").addEventListener("change", (e) => {
     const val = Number(e.target.value) || 0;
     state.config.beaconInvest = val;
@@ -750,20 +955,27 @@ function bindEvents() {
 
   document.getElementById("inpTqqqBuyPrice").addEventListener("change", (e) => {
     state.tqqq.buyPrice = Number(e.target.value) || 0;
+    syncTqqqInvestFromPriceQty();
     saveState();
     renderAll();
   });
 
   document.getElementById("inpTqqqQty").addEventListener("change", (e) => {
     state.tqqq.qty = Math.max(0, Math.floor(Number(e.target.value) || 0));
+    syncTqqqInvestFromPriceQty();
     saveState();
     renderAll();
   });
 
+  // Settings tab inputs
   document.getElementById("cfgTotalSeed").addEventListener("change", (e) => {
     const newTotal = Number(e.target.value) || 0;
     state.config.totalSeed = newTotal;
-    state.config.beaconInvest = Number(((newTotal * (Number(state.config.beaconPct) || 0)) / 100).toFixed(2));
+    if ((Number(state.tqqq.buyPrice) || 0) === 0 && (Number(state.tqqq.qty) || 0) === 0) {
+      state.config.beaconInvest = Number(((newTotal * (Number(state.config.beaconPct) || 0)) / 100).toFixed(2));
+    } else if (newTotal > 0) {
+      state.config.beaconPct = Number(((Number(state.config.beaconInvest) / newTotal) * 100).toFixed(2));
+    }
     state.buyOverrides = {};
     saveState();
     renderAll();
@@ -792,6 +1004,7 @@ function bindEvents() {
   const cfgMap = [
     ["cfgDivisions", "divisions", "num"],
     ["cfgEbbMult", "ebbMult", "num"],
+    ["cfgFloodMult", "floodMult", "num"],
     ["cfgTargetPct", "targetPct", "num"],
     ["cfgFeePct", "feePct", "num"],
     ["cfgCompound", "compound", "str"],
@@ -847,8 +1060,10 @@ function bindEvents() {
   document.getElementById("btnResetAll").addEventListener("click", () => {
     if (confirm("모든 설정값과 매매일지·묶음을 전부 0으로 초기화할까요?")) {
       state = structuredClone(ZERO_STATE);
+      state.orderInput.date = getTodayStr();
       saveState();
       renderAll();
+      showToast("모든 설정값이 0으로 초기화되었습니다.");
     }
   });
 }

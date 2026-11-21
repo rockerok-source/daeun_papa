@@ -806,8 +806,8 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
-// 4. Fast & Accurate US ETF Quote Fetcher (Parallel Race across Naver WorldStock + Yahoo Chart + Stooq)
-function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+// 4. Ultra-Fast & Accurate SOXL/TQQQ Quote Fetcher (Direct CORS APIs + Multi-Proxy Race)
+function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal })
@@ -831,29 +831,85 @@ function formatUsDateFromUnix(sec) {
   }
 }
 
-async function sourceNaverEtf(symbol) {
-  const cb = Date.now();
-  // Naver WorldStock API supports direct browser CORS without slow public proxies
-  const url = `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`;
-  const res = await fetchWithTimeout(url, { cache: "no-store" }, 3000);
-  if (!res.ok) throw new Error("naver http");
-  const data = await res.json();
+function extractNaverPrice(data) {
   const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
   const num = Number(String(rawPrice || "").replace(/,/g, ""));
-  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid");
-
+  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid price");
   const tradedAt = String(data?.localTradedAt || "");
   const m = tradedAt.match(/(\d{4})-(\d{2})-(\d{2})/);
   const marketDate = m ? `${m[2]}/${m[3]}` : "";
   return {
     price: Number(num.toFixed(2)),
-    source: "네이버 해외ETF",
+    source: "네이버 증권",
     marketDate
   };
 }
 
-function parseYahooChartJson(raw) {
-  const data = typeof raw?.contents === "string" ? JSON.parse(raw.contents) : raw;
+// 1) Direct CORS endpoint for Naver Overseas ETF (SOXL.K / TQQQ.O) - zero proxy hop
+async function sourceNaverDirect(symbol) {
+  const cb = Date.now();
+  const suffix = symbol === "SOXL" ? "K" : "O";
+  const urls = [
+    `https://api.stock.naver.com/etf/${symbol}.${suffix}/basic?_=${cb}`,
+    `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`,
+    `https://api.stock.naver.com/etf/${symbol}.K/basic?_=${cb}`
+  ];
+  return Promise.any(
+    urls.map(async (u) => {
+      const res = await fetchWithTimeout(u, { cache: "no-store" }, 3500);
+      if (!res.ok) throw new Error("naver direct http");
+      const data = await res.json();
+      return extractNaverPrice(data);
+    })
+  );
+}
+
+// 2) Direct CORS endpoint via Nasdaq Official Quote API
+async function sourceNasdaqDirect(symbol) {
+  const url = `https://api.nasdaq.com/api/quote/${symbol}/info?assetclass=etf`;
+  const res = await fetchWithTimeout(url, { cache: "no-store" }, 4000);
+  if (!res.ok) throw new Error("nasdaq http");
+  const json = await res.json();
+  const raw = json?.data?.primaryData?.lastSalePrice;
+  const num = Number(String(raw || "").replace(/[^0-9.]/g, ""));
+  if (!num || Number.isNaN(num) || num <= 0) throw new Error("nasdaq invalid");
+  const dtRaw = String(json?.data?.primaryData?.lastTradeTimestamp || "");
+  let marketDate = "";
+  const parsedDt = Date.parse(dtRaw);
+  if (!Number.isNaN(parsedDt)) {
+    marketDate = formatUsDateFromUnix(Math.floor(parsedDt / 1000));
+  }
+  return {
+    price: Number(num.toFixed(2)),
+    source: "나스닥 공식",
+    marketDate
+  };
+}
+
+// 3) Direct CORS endpoint via CNBC Quote API
+async function sourceCnbcDirect(symbol) {
+  const url = `https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols=${symbol}&requestMethod=itv&noCache=${Date.now()}&partnerId=2&fund=1&exthrs=1&output=json`;
+  const res = await fetchWithTimeout(url, { cache: "no-store" }, 4000);
+  if (!res.ok) throw new Error("cnbc http");
+  const json = await res.json();
+  const q = json?.FormattedQuoteResult?.FormattedQuote?.[0];
+  const num = Number(String(q?.last || "").replace(/[^0-9.]/g, ""));
+  if (!num || Number.isNaN(num) || num <= 0) throw new Error("cnbc invalid");
+  const dtStr = String(q?.last_time || "");
+  const m = dtStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const marketDate = m ? `${m[2]}/${m[3]}` : "";
+  return {
+    price: Number(num.toFixed(2)),
+    source: "CNBC 시세",
+    marketDate
+  };
+}
+
+function parseYahooChartText(rawText) {
+  let data = JSON.parse(rawText);
+  if (typeof data?.contents === "string") {
+    data = JSON.parse(data.contents);
+  }
   const result = data?.chart?.result?.[0];
   if (!result) throw new Error("no chart result");
 
@@ -895,23 +951,30 @@ function parseYahooChartJson(raw) {
   };
 }
 
-async function sourceYahooViaProxy(symbol, proxyUrl) {
-  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 3500);
+async function sourceYahooProxy(proxyUrl) {
+  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 4500);
   if (!res.ok) throw new Error("proxy http");
-  const json = await res.json();
-  return parseYahooChartJson(json);
+  const txt = await res.text();
+  return parseYahooChartText(txt);
 }
 
 async function fetchSymbolQuoteFast(symbol) {
   const cb = Date.now();
-  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=5m&includePrePost=false&_=${cb}`;
+  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d&includePrePost=false&_=${cb}`;
+  const suffix = symbol === "SOXL" ? "K" : "O";
+  const naverUrl = `https://api.stock.naver.com/etf/${symbol}.${suffix}/basic?_=${cb}`;
 
-  // Fire all independent sources simultaneously and take whichever valid response arrives FIRST
   const tasks = [
-    sourceNaverEtf(symbol),
-    sourceYahooViaProxy(symbol, `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl)}`),
-    sourceYahooViaProxy(symbol, `https://corsproxy.io/?url=${encodeURIComponent(yUrl)}`),
-    sourceYahooViaProxy(symbol, `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`)
+    sourceNaverDirect(symbol),
+    sourceCnbcDirect(symbol),
+    sourceNasdaqDirect(symbol),
+    sourceYahooProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`),
+    sourceYahooProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl)}`),
+    sourceYahooProxy(`https://corsproxy.io/?url=${encodeURIComponent(yUrl)}`),
+    sourceYahooProxy(`https://thingproxy.freeboard.io/fetch/${yUrl}`),
+    fetchWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(naverUrl)}`, { cache: "no-store" }, 4500)
+      .then((r) => { if (!r.ok) throw new Error("naver proxy"); return r.json(); })
+      .then(extractNaverPrice)
   ];
 
   try {
@@ -926,10 +989,10 @@ async function handleFetchYahooPrices(silent = false) {
   const statusEl = document.getElementById("yahooStatusText");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "⏳ 최신 종가 병렬 조회 중...";
+    btn.textContent = "⏳ 최신 종가 고속 조회 중...";
   }
   if (statusEl) {
-    statusEl.textContent = "SOXL · TQQQ 최신 장마감 종가를 고속 조회 중입니다...";
+    statusEl.textContent = "SOXL · TQQQ 공식 시세 서버 8곳 동시 조회 중...";
   }
 
   const t0 = performance.now();

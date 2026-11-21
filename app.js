@@ -148,7 +148,7 @@ function calcMetrics() {
   // 3. Only actual "매도" records in journal count toward realized PnL!
   let realizedSum = 0;
   state.journal.forEach((row) => {
-    if (row.side === "매도") {
+    if (row.side === "매도" || row.side === "등대매도") {
       const sellAmt = (Number(row.price) || 0) * (Number(row.qty) || 0);
       const buyAmt = (Number(row.refBuyPrice) || 0) * (Number(row.qty) || 0);
       const estFee = (sellAmt + buyAmt) * feeRate;
@@ -218,6 +218,10 @@ function calcMetrics() {
     } else if (row.side === "등대매수") {
       manualTqqqQty += q;
       manualTqqqCost += p * q;
+    } else if (row.side === "등대매도") {
+      manualTqqqQty -= q;
+      const avgCost = (Number(row.refBuyPrice) || Number(state.tqqq.buyPrice) || 0);
+      manualTqqqCost -= avgCost * q;
     }
   });
 
@@ -227,23 +231,27 @@ function calcMetrics() {
 
   const cashBalance = soxlTotalAsset - openCost;
 
-  // 5. TQQQ auto calculation from buyPrice * qty + manual beacon journal rows
-  const tqqqBuyPrice = Number(state.tqqq.buyPrice) || 0;
+  // 5. TQQQ auto calculation from buyPrice * qty + manual beacon journal buy/sell rows
+  const tqqqBasePrice = Number(state.tqqq.buyPrice) || 0;
   const tqqqBaseQty = Number(state.tqqq.qty) || 0;
-  const tqqqBaseCost = Number((tqqqBuyPrice * tqqqBaseQty).toFixed(2));
-  const tqqqQty = tqqqBaseQty + manualTqqqQty;
-  const tqqqActualCost = Number((tqqqBaseCost + manualTqqqCost).toFixed(2));
+  const tqqqBaseCost = Number((tqqqBasePrice * tqqqBaseQty).toFixed(2));
+  const tqqqQty = Math.max(0, tqqqBaseQty + manualTqqqQty);
+  const tqqqActualCost = Math.max(0, Number((tqqqBaseCost + manualTqqqCost).toFixed(2)));
+  const tqqqAvgPrice = tqqqQty > 0
+    ? Number((tqqqActualCost / tqqqQty).toFixed(2))
+    : tqqqBasePrice;
   const tqqqEvalVal = prevTqqq > 0
-    ? (prevTqqq * tqqqBaseQty) + (prevTqqq > 0 ? prevTqqq * manualTqqqQty : manualTqqqCost)
+    ? prevTqqq * tqqqQty
     : tqqqActualCost;
   const tqqqPnl = tqqqEvalVal - tqqqActualCost;
 
-  const totalPortfolio = beaconInvest + soxlTotalAsset;
-  const beaconRatio = totalPortfolio > 0 ? (beaconInvest / totalPortfolio) * 100 : 0;
+  const activeBeaconInvest = tqqqActualCost > 0 ? tqqqActualCost : beaconInvest;
+  const totalPortfolio = activeBeaconInvest + soxlTotalAsset;
+  const beaconRatio = totalPortfolio > 0 ? (activeBeaconInvest / totalPortfolio) * 100 : 0;
 
   return {
     totalSeed,
-    beaconInvest,
+    beaconInvest: activeBeaconInvest,
     soxlInit,
     realizedSum,
     soxlTotalAsset,
@@ -258,7 +266,8 @@ function calcMetrics() {
     openPnl: openMarketVal - openCost,
     cashBalance,
     beaconRatio,
-    tqqqBuyPrice,
+    tqqqBuyPrice: tqqqAvgPrice,
+    tqqqBasePrice,
     tqqqQty,
     tqqqActualCost,
     tqqqEvalVal,
@@ -266,7 +275,17 @@ function calcMetrics() {
   };
 }
 
+function syncBeaconConfigFromCalc(m) {
+  if (state.journal.some((r) => r.side === "등대매수" || r.side === "등대매도")) {
+    state.config.beaconInvest = m.tqqqActualCost;
+    if ((Number(state.config.totalSeed) || 0) > 0) {
+      state.config.beaconPct = Number(((m.tqqqActualCost / Number(state.config.totalSeed)) * 100).toFixed(2));
+    }
+  }
+}
+
 function renderAll() {
+  syncBeaconConfigFromCalc(calcMetrics());
   const m = calcMetrics();
   const cfg = state.config;
   const oi = state.orderInput;
@@ -310,8 +329,8 @@ function renderAll() {
   document.getElementById("kpiUnitAmt").textContent = fmtUsd(m.activeUnit);
   document.getElementById("kpiUnitHint").textContent = `${oi.tide} ×${m.activeMult} (1칸 ${fmtUsd(m.baseDivAmt)})`;
 
-  document.getElementById("kpiBeaconRatio").textContent = `${fmtUsd(m.beaconInvest)} (${m.beaconRatio.toFixed(1)}%)`;
-  document.getElementById("kpiBeaconVal").textContent = `매수 $${m.tqqqBuyPrice.toFixed(2)} · ${m.tqqqQty}주`;
+  document.getElementById("kpiBeaconRatio").textContent = `${fmtUsd(m.tqqqActualCost)} (${m.beaconRatio.toFixed(1)}%)`;
+  document.getElementById("kpiBeaconVal").textContent = `평단 $${m.tqqqBuyPrice.toFixed(2)} · ${m.tqqqQty}주`;
 
   // Order Inputs
   document.getElementById("inpOrderDate").value = oi.date;
@@ -322,12 +341,12 @@ function renderAll() {
   document.getElementById("inpPrevSoxl").value = oi.prevSoxl;
   document.getElementById("inpPrevTqqq").value = oi.prevTqqq;
 
-  // TQQQ Inputs
-  document.getElementById("inpTqqqInvest").value = m.beaconInvest;
-  document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice;
+  // TQQQ Inputs (auto-summed from base + journal 등대매수/등대매도)
+  document.getElementById("inpTqqqInvest").value = m.tqqqActualCost.toFixed(2);
+  document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice.toFixed(2);
   document.getElementById("inpTqqqQty").value = m.tqqqQty;
   document.getElementById("tqqqSummaryLine").innerHTML =
-    `자동계산 원금: <strong>${fmtUsd(m.tqqqActualCost)}</strong> · 현재평가금: <strong>${fmtUsd(m.tqqqEvalVal)}</strong> · 손익: <strong class="${m.tqqqPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(m.tqqqPnl)}</strong>`;
+    `총투자금: <strong>${fmtUsd(m.tqqqActualCost)}</strong> · 평단: <strong>$${m.tqqqBuyPrice.toFixed(2)}</strong> · 수량: <strong>${m.tqqqQty}주</strong> · 평가손익: <strong class="${m.tqqqPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(m.tqqqPnl)}</strong>`;
 
   const tideBadge = document.getElementById("tideBadge");
   tideBadge.textContent = `${oi.tide} ×${m.activeMult}`;
@@ -731,8 +750,10 @@ function renderJournal(m) {
       ? (pr - refBp) * q - (pr * q + refBp * q) * feeRate
       : 0;
 
-    const sideClass = row.side === "매도" ? "side-sell" : (row.side === "등대매수" ? "side-beacon" : "side-buy");
-    const badgeColor = row.side === "매도" ? "accent-green" : (row.side === "등대매수" ? "accent-amber" : "accent-blue");
+    const isSellSide = row.side === "매도" || row.side === "등대매도";
+    const isBeaconSide = row.side === "등대매수" || row.side === "등대매도";
+    const sideClass = row.side === "매도" ? "side-sell" : (isBeaconSide ? "side-beacon" : "side-buy");
+    const badgeColor = row.side === "매도" ? "accent-green" : (isBeaconSide ? "accent-amber" : "accent-blue");
 
     const card = document.createElement("div");
     card.className = `order-row-card ${sideClass}`;
@@ -744,7 +765,7 @@ function renderJournal(m) {
           <span class="muted-sm">· 체결액 ${fmtUsd(tradeAmt)}</span>
         </div>
         <div class="order-row-meta">
-          ${row.side === "매도"
+          ${isSellSide
             ? `<span class="${pnl >= 0 ? "accent-green" : "accent-red"}"><strong>손익 ${fmtUsd(pnl)}</strong></span>`
             : `<span class="muted-sm">${row.tide}</span>`
           }
@@ -768,7 +789,8 @@ function renderJournal(m) {
           <select class="mini-input center" data-j-idx="${idx}" data-field="side">
             <option value="매수" ${row.side === "매수" ? "selected" : ""}>매수</option>
             <option value="매도" ${row.side === "매도" ? "selected" : ""}>매도</option>
-            <option value="등대매수" ${row.side === "등대매수" ? "selected" : ""}>등대</option>
+            <option value="등대매수" ${row.side === "등대매수" ? "selected" : ""}>등대매수</option>
+            <option value="등대매도" ${row.side === "등대매도" ? "selected" : ""}>등대매도</option>
           </select>
         </div>
         <div class="mini-field">

@@ -225,6 +225,31 @@ function renderAll() {
   document.getElementById("headerSummary").textContent =
     `총시드 ${fmtUsd(m.totalSeed)} · 배 ${cfg.divisions}칸 · ${oi.tide} ×${m.activeMult}`;
 
+  // Top 2 Summary Cards matching uploaded image
+  const totalInvested = m.openCost + m.tqqqActualCost;
+  const loopRemainCash = Math.max(0, m.cashBalance);
+  const totalCumulativeProfit = m.realizedSum + m.openPnl + m.tqqqPnl;
+  const seedReturnRate = m.totalSeed > 0 ? (totalCumulativeProfit / m.totalSeed) * 100 : 0;
+
+  const topInvEl = document.getElementById("topInvestedAmount");
+  const topRemCashEl = document.getElementById("topLoopRemainCash");
+  const topProfitEl = document.getElementById("topTotalProfit");
+  const topRateEl = document.getElementById("topSeedReturnPct");
+
+  if (topInvEl) topInvEl.textContent = fmtUsd(totalInvested);
+  if (topRemCashEl) topRemCashEl.textContent = `루프 잔여현금: ${fmtUsd(loopRemainCash)}`;
+
+  if (topProfitEl) {
+    const sign = totalCumulativeProfit >= 0 ? "+" : "-";
+    topProfitEl.textContent = `${sign}${fmtUsd(Math.abs(totalCumulativeProfit))}`;
+    topProfitEl.className = `top-summary-val ${totalCumulativeProfit >= 0 ? "top-summary-gain" : "top-summary-loss"}`;
+  }
+
+  if (topRateEl) {
+    const rSign = seedReturnRate >= 0 ? "+" : "-";
+    topRateEl.textContent = `시드 대비 수익률: ${rSign}${Math.abs(seedReturnRate).toFixed(2)}%`;
+  }
+
   document.getElementById("kpiSoxlTotal").textContent = fmtUsd(m.soxlTotalAsset);
   const relEl = document.getElementById("kpiRealized");
   relEl.textContent = `실현손익: ${fmtUsd(m.realizedSum)}`;

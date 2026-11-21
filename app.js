@@ -41,8 +41,8 @@ const DEFAULT_STATE = {
   orderInput: {
     date: getTodayStr(),
     tide: "썰물",
-    prevSoxl: 77.05,
-    prevTqqq: 62.01
+    prevSoxl: 0,
+    prevTqqq: 0
   },
   ladder: structuredClone(DEFAULT_LADDER),
   buyOverrides: {},
@@ -781,8 +781,8 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
-// 4. Yahoo Finance previous close auto-fetch via multi-source fallback (Naver WorldStock + Yahoo CORS proxies)
-function fetchWithTimeout(url, options = {}, timeoutMs = 6000) {
+// 4. Fast & Accurate US ETF Quote Fetcher (Parallel Race across Naver WorldStock + Yahoo Chart + Stooq)
+function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal })
@@ -806,141 +806,118 @@ function formatUsDateFromUnix(sec) {
   }
 }
 
-async function fetchFromYahooEndpoints(symbol) {
+async function sourceNaverEtf(symbol) {
   const cb = Date.now();
-  // Use 5m intraday range=5d with includePrePost=false so we get the exact latest regular-session 16:00 ET close
-  const yahooUrls = [
-    `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=5m&includePrePost=false&_=${cb}`,
-    `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d&_=${cb}`
-  ];
+  // Naver WorldStock API supports direct browser CORS without slow public proxies
+  const url = `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`;
+  const res = await fetchWithTimeout(url, { cache: "no-store" }, 3000);
+  if (!res.ok) throw new Error("naver http");
+  const data = await res.json();
+  const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
+  const num = Number(String(rawPrice || "").replace(/,/g, ""));
+  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid");
 
-  const proxyBuilders = [
-    (u) => `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(u)}`,
-    (u) => `https://api.allorigins.win/get?url=${encodeURIComponent(u)}`,
-    (u) => `https://corsproxy.io/?url=${encodeURIComponent(u)}`,
-    (u) => `https://thingproxy.freeboard.io/fetch/${u}`
-  ];
+  const tradedAt = String(data?.localTradedAt || "");
+  const m = tradedAt.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const marketDate = m ? `${m[2]}/${m[3]}` : "";
+  return {
+    price: Number(num.toFixed(2)),
+    source: "네이버 해외ETF",
+    marketDate
+  };
+}
 
-  for (const yUrl of yahooUrls) {
-    for (const buildProxy of proxyBuilders) {
-      try {
-        const proxyUrl = buildProxy(yUrl);
-        const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 5500);
-        if (!res.ok) continue;
+function parseYahooChartJson(raw) {
+  const data = typeof raw?.contents === "string" ? JSON.parse(raw.contents) : raw;
+  const result = data?.chart?.result?.[0];
+  if (!result) throw new Error("no chart result");
 
-        let data = await res.json();
-        if (data && typeof data.contents === "string") {
-          data = JSON.parse(data.contents);
-        }
+  const meta = result.meta || {};
+  const timestamps = result.timestamp || [];
+  const rawCloses = result.indicators?.quote?.[0]?.close || [];
 
-        const result = data?.chart?.result?.[0];
-        if (!result) continue;
-
-        const meta = result.meta || {};
-        const timestamps = result.timestamp || [];
-        const rawCloses = result.indicators?.quote?.[0]?.close || [];
-
-        let lastClose = null;
-        let lastTs = null;
-        for (let i = rawCloses.length - 1; i >= 0; i--) {
-          const v = rawCloses[i];
-          if (typeof v === "number" && !Number.isNaN(v) && v > 0) {
-            lastClose = v;
-            lastTs = timestamps[i] || meta.regularMarketTime || null;
-            break;
-          }
-        }
-
-        // Compare against meta.regularMarketPrice if it is newer
-        const regPrice = typeof meta.regularMarketPrice === "number" && meta.regularMarketPrice > 0
-          ? meta.regularMarketPrice
-          : null;
-        const regTime = typeof meta.regularMarketTime === "number" ? meta.regularMarketTime : 0;
-
-        let finalPrice = lastClose;
-        let finalTs = lastTs;
-        if (regPrice && (!finalPrice || regTime >= (finalTs || 0))) {
-          finalPrice = regPrice;
-          finalTs = regTime || finalTs;
-        }
-
-        if (finalPrice && finalPrice > 0) {
-          return {
-            price: Number(finalPrice.toFixed(2)),
-            source: "야후 파이낸스",
-            marketDate: formatUsDateFromUnix(finalTs),
-            ts: finalTs || 0
-          };
-        }
-      } catch (err) {
-        // Try next proxy
-      }
+  let lastClose = null;
+  let lastTs = null;
+  for (let i = rawCloses.length - 1; i >= 0; i--) {
+    const v = rawCloses[i];
+    if (typeof v === "number" && !Number.isNaN(v) && v > 0) {
+      lastClose = v;
+      lastTs = timestamps[i] || meta.regularMarketTime || null;
+      break;
     }
   }
-  return null;
-}
 
-async function fetchFromNaverWorldStock(symbol) {
-  // Naver Finance mobile/worldstock API (used only as fallback if Yahoo fails)
-  const cb = Date.now();
-  const urls = [
-    `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`,
-    `https://api.stock.naver.com/stock/${symbol}.O/basic?_=${cb}`,
-    `https://api.stock.naver.com/etf/${symbol}/basic?_=${cb}`
-  ];
-  for (const url of urls) {
-    try {
-      const res = await fetchWithTimeout(url, { cache: "no-store" }, 4500);
-      if (!res.ok) continue;
-      const data = await res.json();
-      // Prefer regular-session closePrice/nowPrice (avoid stale prevClosePrice from Thursday)
-      const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
-      const tradedAt = data?.localTradedAt || "";
-      const dateMatch = String(tradedAt).match(/(\d{4})-(\d{2})-(\d{2})/);
-      const marketDate = dateMatch ? `${dateMatch[2]}/${dateMatch[3]}` : "";
-      if (rawPrice) {
-        const num = Number(String(rawPrice).replace(/,/g, ""));
-        if (!Number.isNaN(num) && num > 0) {
-          return {
-            price: Number(num.toFixed(2)),
-            source: "네이버 해외ETF",
-            marketDate,
-            ts: dateMatch ? Math.floor(new Date(tradedAt).getTime() / 1000) : 0
-          };
-        }
-      }
-    } catch (e) {
-      // fallback to next source
-    }
+  const regPrice = typeof meta.regularMarketPrice === "number" && meta.regularMarketPrice > 0
+    ? meta.regularMarketPrice
+    : null;
+  const regTime = typeof meta.regularMarketTime === "number" ? meta.regularMarketTime : 0;
+
+  let finalPrice = lastClose;
+  let finalTs = lastTs;
+  if (regPrice && (!finalPrice || regTime >= (finalTs || 0))) {
+    finalPrice = regPrice;
+    finalTs = regTime || finalTs;
   }
-  return null;
+
+  if (!finalPrice || Number.isNaN(finalPrice) || finalPrice <= 0) {
+    throw new Error("invalid yahoo price");
+  }
+
+  return {
+    price: Number(finalPrice.toFixed(2)),
+    source: "야후 파이낸스",
+    marketDate: formatUsDateFromUnix(finalTs)
+  };
 }
 
-async function fetchSymbolQuote(symbol) {
-  // Prioritize Yahoo Finance directly; only fall back to Naver if Yahoo fails
-  const yahooRes = await fetchFromYahooEndpoints(symbol);
-  if (yahooRes) return yahooRes;
-
-  const naverRes = await fetchFromNaverWorldStock(symbol);
-  if (naverRes) return naverRes;
-
-  return null;
+async function sourceYahooViaProxy(symbol, proxyUrl) {
+  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 3500);
+  if (!res.ok) throw new Error("proxy http");
+  const json = await res.json();
+  return parseYahooChartJson(json);
 }
 
-async function handleFetchYahooPrices() {
+async function fetchSymbolQuoteFast(symbol) {
+  const cb = Date.now();
+  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=5m&includePrePost=false&_=${cb}`;
+
+  // Fire all independent sources simultaneously and take whichever valid response arrives FIRST
+  const tasks = [
+    sourceNaverEtf(symbol),
+    sourceYahooViaProxy(symbol, `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl)}`),
+    sourceYahooViaProxy(symbol, `https://corsproxy.io/?url=${encodeURIComponent(yUrl)}`),
+    sourceYahooViaProxy(symbol, `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`)
+  ];
+
+  try {
+    return await Promise.any(tasks);
+  } catch (e) {
+    return null;
+  }
+}
+
+async function handleFetchYahooPrices(silent = false) {
   const btn = document.getElementById("btnFetchYahoo");
   const statusEl = document.getElementById("yahooStatusText");
-  btn.disabled = true;
-  btn.textContent = "⏳ 야후 최신 종가 조회 중...";
-  statusEl.textContent = "야후 파이낸스 최신 장마감(금요일 정규장) 종가를 조회하고 있습니다...";
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "⏳ 최신 종가 병렬 조회 중...";
+  }
+  if (statusEl) {
+    statusEl.textContent = "SOXL · TQQQ 최신 장마감 종가를 고속 조회 중입니다...";
+  }
 
+  const t0 = performance.now();
   const [soxlRes, tqqqRes] = await Promise.all([
-    fetchSymbolQuote("SOXL"),
-    fetchSymbolQuote("TQQQ")
+    fetchSymbolQuoteFast("SOXL"),
+    fetchSymbolQuoteFast("TQQQ")
   ]);
+  const elapsedSec = ((performance.now() - t0) / 1000).toFixed(1);
 
-  btn.disabled = false;
-  btn.textContent = "🔄 야후 파이낸스 전일 종가 자동조회";
+  if (btn) {
+    btn.disabled = false;
+    btn.textContent = "🔄 전일(최신) 종가 빠른 자동조회";
+  }
 
   if (soxlRes || tqqqRes) {
     if (soxlRes) state.orderInput.prevSoxl = soxlRes.price;
@@ -948,13 +925,22 @@ async function handleFetchYahooPrices() {
     state.buyOverrides = {};
     saveState();
     renderAll();
+
     const refObj = soxlRes || tqqqRes;
-    const dateTag = refObj.marketDate ? `미장 ${refObj.marketDate} 마감 기준` : new Date().toTimeString().slice(0, 5);
-    statusEl.textContent = `${refObj.source} 반영 (${dateTag}) — SOXL $${Number(state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${Number(state.orderInput.prevTqqq).toFixed(2)}`;
-    showToast(`최신 종가 반영 완료 (${dateTag})`);
+    const dateTag = refObj.marketDate ? `미장 ${refObj.marketDate} 마감` : "최신 마감";
+    if (statusEl) {
+      statusEl.textContent = `✅ ${refObj.source} 반영 (${dateTag} · ${elapsedSec}초) — SOXL $${Number(state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${Number(state.orderInput.prevTqqq).toFixed(2)}`;
+    }
+    if (!silent) {
+      showToast(`종가 반영 완료 (${elapsedSec}초 · ${dateTag})`);
+    }
   } else {
-    statusEl.textContent = "사파리 보안/광고차단 또는 일시적 서버 지연으로 조회되지 않았습니다. 우측 SOXL·TQQQ 링크에서 확인 후 입력해 주세요.";
-    showToast("자동 조회 실패 — 우측 링크에서 확인");
+    if (statusEl) {
+      statusEl.textContent = "⚠️ 조회 지연 — 우측 SOXL·TQQQ 링크에서 확인 후 직접 입력해 주세요.";
+    }
+    if (!silent) {
+      showToast("조회 지연 — 우측 링크에서 확인");
+    }
   }
 }
 
@@ -986,7 +972,7 @@ function bindEvents() {
   });
 
   // 4. Yahoo Finance button
-  document.getElementById("btnFetchYahoo").addEventListener("click", handleFetchYahooPrices);
+  document.getElementById("btnFetchYahoo").addEventListener("click", () => handleFetchYahooPrices(false));
 
   // 1. Add sinker stage button
   document.getElementById("btnAddSink").addEventListener("click", () => {
@@ -1176,4 +1162,11 @@ function bindEvents() {
 }
 
 bindEvents();
+// Migrate legacy default placeholder 77.05 / 62.01 if present
+if (state.orderInput.prevSoxl === 77.05 && state.orderInput.prevTqqq === 62.01) {
+  state.orderInput.prevSoxl = 0;
+  state.orderInput.prevTqqq = 0;
+}
 renderAll();
+// Automatically fetch latest closing prices when opening the app
+handleFetchYahooPrices(true);

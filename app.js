@@ -806,8 +806,8 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
-// 4. Fast & Accurate US ETF Quote Fetcher (Parallel Race across Naver WorldStock + Yahoo Chart + Stooq)
-function fetchWithTimeout(url, options = {}, timeoutMs = 3500) {
+// 4. Resilient Multi-Source US ETF Quote Fetcher (Mobile Safari / GitHub Pages Compatible)
+function fetchWithTimeout(url, options = {}, timeoutMs = 8000) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
   return fetch(url, { ...options, signal: controller.signal })
@@ -831,30 +831,12 @@ function formatUsDateFromUnix(sec) {
   }
 }
 
-async function sourceNaverEtf(symbol) {
-  const cb = Date.now();
-  // Naver WorldStock API supports direct browser CORS without slow public proxies
-  const url = `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`;
-  const res = await fetchWithTimeout(url, { cache: "no-store" }, 3000);
-  if (!res.ok) throw new Error("naver http");
-  const data = await res.json();
-  const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
-  const num = Number(String(rawPrice || "").replace(/,/g, ""));
-  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid");
-
-  const tradedAt = String(data?.localTradedAt || "");
-  const m = tradedAt.match(/(\d{4})-(\d{2})-(\d{2})/);
-  const marketDate = m ? `${m[2]}/${m[3]}` : "";
-  return {
-    price: Number(num.toFixed(2)),
-    source: "네이버 해외ETF",
-    marketDate
-  };
-}
-
-function parseYahooChartJson(raw) {
-  const data = typeof raw?.contents === "string" ? JSON.parse(raw.contents) : raw;
-  const result = data?.chart?.result?.[0];
+function parseYahooChartText(rawText) {
+  let parsed = JSON.parse(rawText);
+  if (typeof parsed?.contents === "string") {
+    parsed = JSON.parse(parsed.contents);
+  }
+  const result = parsed?.chart?.result?.[0];
   if (!result) throw new Error("no chart result");
 
   const meta = result.meta || {};
@@ -895,23 +877,68 @@ function parseYahooChartJson(raw) {
   };
 }
 
-async function sourceYahooViaProxy(symbol, proxyUrl) {
-  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 3500);
+async function sourceYahooProxy(proxyUrl) {
+  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 8000);
   if (!res.ok) throw new Error("proxy http");
-  const json = await res.json();
-  return parseYahooChartJson(json);
+  const txt = await res.text();
+  return parseYahooChartText(txt);
+}
+
+async function sourceNaverViaProxy(symbol) {
+  const cb = Date.now();
+  // Naver overseas ETF code uses .O (NASDAQ) or .K (NYSE Arca)
+  const targetUrl = `https://api.stock.naver.com/etf/${symbol}.O/basic?_=${cb}`;
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 8000);
+  if (!res.ok) throw new Error("naver proxy http");
+  const data = await res.json();
+  const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
+  const num = Number(String(rawPrice || "").replace(/,/g, ""));
+  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid");
+
+  const tradedAt = String(data?.localTradedAt || "");
+  const m = tradedAt.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const marketDate = m ? `${m[2]}/${m[3]}` : "";
+  return {
+    price: Number(num.toFixed(2)),
+    source: "네이버 증권",
+    marketDate
+  };
+}
+
+async function sourceStooqViaProxy(symbol) {
+  const targetUrl = `https://stooq.com/q/l/?s=${symbol.toLowerCase()}.us&f=sd2t2ohlcv&h&e=csv`;
+  const proxyUrl = `https://api.allorigins.win/raw?url=${encodeURIComponent(targetUrl)}`;
+  const res = await fetchWithTimeout(proxyUrl, { cache: "no-store" }, 8000);
+  if (!res.ok) throw new Error("stooq http");
+  const csv = await res.text();
+  const lines = csv.trim().split(/\r?\n/);
+  if (lines.length < 2) throw new Error("stooq empty");
+  const cols = lines[1].split(",");
+  const closeVal = Number(cols[6]);
+  if (!closeVal || Number.isNaN(closeVal) || closeVal <= 0) throw new Error("stooq invalid");
+  const dateStr = String(cols[1] || "");
+  const dm = dateStr.match(/(\d{4})-(\d{2})-(\d{2})/);
+  const marketDate = dm ? `${dm[2]}/${dm[3]}` : "";
+  return {
+    price: Number(closeVal.toFixed(2)),
+    source: "Stooq 시세",
+    marketDate
+  };
 }
 
 async function fetchSymbolQuoteFast(symbol) {
   const cb = Date.now();
-  const yUrl = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=5m&includePrePost=false&_=${cb}`;
+  const yUrl1 = `https://query1.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d&includePrePost=false&_=${cb}`;
+  const yUrl2 = `https://query2.finance.yahoo.com/v8/finance/chart/${symbol}?range=5d&interval=1d&includePrePost=false&_=${cb}`;
 
-  // Fire all independent sources simultaneously and take whichever valid response arrives FIRST
   const tasks = [
-    sourceNaverEtf(symbol),
-    sourceYahooViaProxy(symbol, `https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl)}`),
-    sourceYahooViaProxy(symbol, `https://corsproxy.io/?url=${encodeURIComponent(yUrl)}`),
-    sourceYahooViaProxy(symbol, `https://api.allorigins.win/get?url=${encodeURIComponent(yUrl)}`)
+    sourceYahooProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl1)}`),
+    sourceYahooProxy(`https://api.allorigins.win/get?url=${encodeURIComponent(yUrl2)}`),
+    sourceYahooProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl1)}`),
+    sourceYahooProxy(`https://corsproxy.io/?url=${encodeURIComponent(yUrl1)}`),
+    sourceNaverViaProxy(symbol),
+    sourceStooqViaProxy(symbol)
   ];
 
   try {

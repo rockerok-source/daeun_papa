@@ -32,22 +32,18 @@
     <!-- Toast Notification -->
     <div class="toast" id="toastMsg">저장되었습니다.</div>
 
-    <!-- Top Summary Strip (Above 복리 배 총자산 / 가용 현금 잔고) -->
-    <section class="top-summary-grid" id="topSummaryStrip">
-      <div class="top-summary-card">
-        <span class="top-summary-label">총 투자금액 (보유 원금)</span>
-        <strong class="top-summary-val" id="topInvestedAmount">$0.00</strong>
-        <span class="top-summary-sub" id="topLoopRemainCash">루프 잔여현금: $0.00</span>
-      </div>
-      <div class="top-summary-card">
-        <span class="top-summary-label">총 누적 수익금액</span>
-        <strong class="top-summary-val top-summary-gain" id="topTotalProfit">+$0.00</strong>
-        <span class="top-summary-sub" id="topSeedReturnPct">시드 대비 수익률: +0.00%</span>
-      </div>
-    </section>
-
-    <!-- KPI Strip -->
+    <!-- KPI Strip (6 Cards with identical card background, border, font family, and font sizes) -->
     <section class="kpi-grid" id="kpiStrip">
+      <div class="kpi-card">
+        <span class="kpi-label">총 투자금액 (보유 원금)</span>
+        <strong class="kpi-val" id="topInvestedAmount">$0.00</strong>
+        <span class="kpi-hint" id="topLoopRemainCash">루프 잔여현금: $0.00</span>
+      </div>
+      <div class="kpi-card">
+        <span class="kpi-label">총 누적 수익금액</span>
+        <strong class="kpi-val accent-green" id="topTotalProfit">+$0.00</strong>
+        <span class="kpi-hint" id="topSeedReturnPct">시드 대비 수익률: +0.00%</span>
+      </div>
       <div class="kpi-card">
         <span class="kpi-label">복리 배(SOXL) 총자산</span>
         <strong class="kpi-val" id="kpiSoxlTotal">$9,000.00</strong>

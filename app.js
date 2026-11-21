@@ -242,7 +242,7 @@ function renderAll() {
   if (topProfitEl) {
     const sign = totalCumulativeProfit >= 0 ? "+" : "-";
     topProfitEl.textContent = `${sign}${fmtUsd(Math.abs(totalCumulativeProfit))}`;
-    topProfitEl.className = `top-summary-val ${totalCumulativeProfit >= 0 ? "top-summary-gain" : "top-summary-loss"}`;
+    topProfitEl.className = `kpi-val ${totalCumulativeProfit >= 0 ? "accent-green" : "accent-red"}`;
   }
 
   if (topRateEl) {

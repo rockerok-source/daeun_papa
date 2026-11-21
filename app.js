@@ -166,10 +166,14 @@ function calcMetrics() {
   const activeMult = state.orderInput.tide === "밀물" ? floodMult : ebbMult;
   const activeUnit = baseDivAmt * activeMult;
 
+  const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
+  const prevTqqq = Number(state.orderInput.prevTqqq) || 0;
+
+  // Calculate open SOXL lots & manual journal buy/sell rows
   let openCost = 0;
   let openQty = 0;
   let openMarketVal = 0;
-  const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
+  const lotsById = {};
 
   state.lots.forEach((lot) => {
     const q = Number(lot.qty) || 0;
@@ -177,16 +181,61 @@ function calcMetrics() {
     openQty += q;
     openCost += p * q;
     openMarketVal += prevSoxl * q;
+    if (lot.id) {
+      lotsById[lot.id] = (lotsById[lot.id] || 0) + q;
+    }
   });
+
+  // Manual journal buy/sell entries not linked to existing open lots also reflect in holdings/cost
+  let manualSoxlCost = 0;
+  let manualSoxlQty = 0;
+  let manualTqqqCost = 0;
+  let manualTqqqQty = 0;
+
+  const manualBuyQtyByLot = {};
+  const sellQtyByLot = {};
+  state.journal.forEach((row) => {
+    const q = Number(row.qty) || 0;
+    if (row.side === "매수" && row.lotId && !lotsById[row.lotId]) {
+      manualBuyQtyByLot[row.lotId] = (manualBuyQtyByLot[row.lotId] || 0) + q;
+    } else if (row.side === "매도" && row.lotId) {
+      sellQtyByLot[row.lotId] = (sellQtyByLot[row.lotId] || 0) + q;
+    }
+  });
+
+  state.journal.forEach((row) => {
+    const p = Number(row.price) || 0;
+    const q = Number(row.qty) || 0;
+    if (row.side === "매수" && row.lotId && !lotsById[row.lotId]) {
+      const remQ = Math.max(0, (manualBuyQtyByLot[row.lotId] || 0) - (sellQtyByLot[row.lotId] || 0));
+      if (remQ > 0 && (manualBuyQtyByLot[row.lotId] || 0) > 0) {
+        const ratio = remQ / manualBuyQtyByLot[row.lotId];
+        const effQty = q * ratio;
+        manualSoxlQty += effQty;
+        manualSoxlCost += p * effQty;
+        manualBuyQtyByLot[row.lotId] = 0;
+      }
+    } else if (row.side === "등대매수") {
+      manualTqqqQty += q;
+      manualTqqqCost += p * q;
+    }
+  });
+
+  openQty += manualSoxlQty;
+  openCost += manualSoxlCost;
+  openMarketVal += prevSoxl * manualSoxlQty;
 
   const cashBalance = soxlTotalAsset - openCost;
 
-  // 5. TQQQ auto calculation from buyPrice * qty
+  // 5. TQQQ auto calculation from buyPrice * qty + manual beacon journal rows
   const tqqqBuyPrice = Number(state.tqqq.buyPrice) || 0;
-  const tqqqQty = Number(state.tqqq.qty) || 0;
-  const tqqqActualCost = Number((tqqqBuyPrice * tqqqQty).toFixed(2));
-  const prevTqqq = Number(state.orderInput.prevTqqq) || 0;
-  const tqqqEvalVal = prevTqqq > 0 ? prevTqqq * tqqqQty : tqqqActualCost;
+  const tqqqBaseQty = Number(state.tqqq.qty) || 0;
+  const tqqqBaseCost = Number((tqqqBuyPrice * tqqqBaseQty).toFixed(2));
+  const tqqqQty = tqqqBaseQty + manualTqqqQty;
+  const tqqqActualCost = Number((tqqqBaseCost + manualTqqqCost).toFixed(2));
+  const tqqqEvalVal = prevTqqq > 0
+    ? (prevTqqq * tqqqBaseQty) + (prevTqqq > 0 ? prevTqqq * manualTqqqQty : manualTqqqCost)
+    : tqqqActualCost;
   const tqqqPnl = tqqqEvalVal - tqqqActualCost;
 
   const totalPortfolio = beaconInvest + soxlTotalAsset;

@@ -23,7 +23,7 @@ const DEFAULT_LADDER = [
 const DEFAULT_STATE = {
   config: {
     totalSeed: 10000,
-    beaconInvest: 1000,
+    beaconInvest: 0,
     beaconPct: 10,
     divisions: 18,
     ebbMult: 2.5,
@@ -31,17 +31,18 @@ const DEFAULT_STATE = {
     targetPct: 2.5,
     feePct: 0.07,
     compound: "Y",
-    rebTqqqVal: 1180,
-    rebSoxlVal: 9650
+    rebTqqqVal: 0,
+    rebSoxlVal: 0
   },
   tqqq: {
-    buyPrice: 62.50,
-    qty: 16
+    buyPrice: 0,
+    qty: 0
   },
   orderInput: {
     date: getTodayStr(),
     tide: "썰물",
     prevSoxl: 0,
+    liveSoxl: 0,
     prevTqqq: 0
   },
   ladder: structuredClone(DEFAULT_LADDER),
@@ -73,6 +74,7 @@ const ZERO_STATE = {
     date: getTodayStr(),
     tide: "썰물",
     prevSoxl: 0,
+    liveSoxl: 0,
     prevTqqq: 0
   },
   ladder: structuredClone(DEFAULT_LADDER),
@@ -105,8 +107,22 @@ function loadState() {
       lots: Array.isArray(parsed.lots) ? parsed.lots : [],
       journal: Array.isArray(parsed.journal) ? parsed.journal : []
     };
+    // Remove legacy hardcoded TQQQ 62.50 / 16 default if user never edited it and has no beacon journal
+    if (
+      parsed.tqqq &&
+      Number(parsed.tqqq.buyPrice) === 62.5 &&
+      Number(parsed.tqqq.qty) === 16 &&
+      !merged.journal.some((r) => r.side === "등대매수" || r.side === "등대매도")
+    ) {
+      merged.tqqq.buyPrice = 0;
+      merged.tqqq.qty = 0;
+      merged.config.beaconInvest = 0;
+    }
     if (!merged.orderInput.date) {
       merged.orderInput.date = getTodayStr();
+    }
+    if (!merged.orderInput.liveSoxl && merged.orderInput.prevSoxl) {
+      merged.orderInput.liveSoxl = merged.orderInput.prevSoxl;
     }
     return merged;
   } catch (e) {
@@ -138,6 +154,38 @@ function fmtUsd(n) {
   return `${sign}$${Math.abs(num).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+// 4 & 5. Next LP sequence helpers based on the latest LP ID in journal & lots
+function getNextSoxlLotId() {
+  let maxNum = 0;
+  const extractNum = (idStr) => {
+    const m = String(idStr || "").toUpperCase().match(/^LP-S?(\d+)$/);
+    return m ? Number(m[1]) : 0;
+  };
+  state.journal.forEach((row) => {
+    if (row.side === "매수" || row.side === "매도" || String(row.lotId || "").toUpperCase().startsWith("LP-S")) {
+      const n = extractNum(row.lotId);
+      if (n > maxNum) maxNum = n;
+    }
+  });
+  state.lots.forEach((lot) => {
+    const n = extractNum(lot.id);
+    if (n > maxNum) maxNum = n;
+  });
+  return `LP-S${String(maxNum + 1).padStart(2, "0")}`;
+}
+
+function getNextBeaconLotId() {
+  let maxNum = 0;
+  state.journal.forEach((row) => {
+    const m = String(row.lotId || "").toUpperCase().match(/^LP-T(\d+)$/);
+    if (m) {
+      const n = Number(m[1]);
+      if (n > maxNum) maxNum = n;
+    }
+  });
+  return `LP-T${String(maxNum + 1).padStart(2, "0")}`;
+}
+
 function calcMetrics() {
   const cfg = state.config;
   const totalSeed = Number(cfg.totalSeed) || 0;
@@ -145,7 +193,6 @@ function calcMetrics() {
   const soxlInit = Math.max(0, totalSeed - beaconInvest);
   const feeRate = (Number(cfg.feePct) || 0) / 100;
 
-  // 3. Only actual "매도" records in journal count toward realized PnL!
   let realizedSum = 0;
   state.journal.forEach((row) => {
     if (row.side === "매도" || row.side === "등대매도") {
@@ -167,9 +214,11 @@ function calcMetrics() {
   const activeUnit = baseDivAmt * activeMult;
 
   const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
+  const liveSoxl = Number(state.orderInput.liveSoxl) || prevSoxl;
+  const evalSoxlPrice = liveSoxl > 0 ? liveSoxl : prevSoxl;
   const prevTqqq = Number(state.orderInput.prevTqqq) || 0;
 
-  // Calculate open SOXL lots & manual journal buy/sell rows
+  // Open SOXL lots & manual journal buy/sell rows
   let openCost = 0;
   let openQty = 0;
   let openMarketVal = 0;
@@ -180,13 +229,12 @@ function calcMetrics() {
     const p = Number(lot.buyPrice) || 0;
     openQty += q;
     openCost += p * q;
-    openMarketVal += prevSoxl * q;
+    openMarketVal += evalSoxlPrice * q;
     if (lot.id) {
       lotsById[lot.id] = (lotsById[lot.id] || 0) + q;
     }
   });
 
-  // Manual journal buy/sell entries not linked to existing open lots also reflect in holdings/cost
   let manualSoxlCost = 0;
   let manualSoxlQty = 0;
   let manualTqqqCost = 0;
@@ -227,11 +275,11 @@ function calcMetrics() {
 
   openQty += manualSoxlQty;
   openCost += manualSoxlCost;
-  openMarketVal += prevSoxl * manualSoxlQty;
+  openMarketVal += evalSoxlPrice * manualSoxlQty;
 
   const cashBalance = soxlTotalAsset - openCost;
 
-  // 5. TQQQ auto calculation from buyPrice * qty + manual beacon journal buy/sell rows
+  // TQQQ auto calculation from user input (buyPrice * qty) + manual beacon journal rows
   const tqqqBasePrice = Number(state.tqqq.buyPrice) || 0;
   const tqqqBaseQty = Number(state.tqqq.qty) || 0;
   const tqqqBaseCost = Number((tqqqBasePrice * tqqqBaseQty).toFixed(2));
@@ -245,7 +293,7 @@ function calcMetrics() {
     : tqqqActualCost;
   const tqqqPnl = tqqqEvalVal - tqqqActualCost;
 
-  const activeBeaconInvest = tqqqActualCost > 0 ? tqqqActualCost : beaconInvest;
+  const activeBeaconInvest = tqqqActualCost;
   const totalPortfolio = activeBeaconInvest + soxlTotalAsset;
   const beaconRatio = totalPortfolio > 0 ? (activeBeaconInvest / totalPortfolio) * 100 : 0;
 
@@ -276,11 +324,9 @@ function calcMetrics() {
 }
 
 function syncBeaconConfigFromCalc(m) {
-  if (state.journal.some((r) => r.side === "등대매수" || r.side === "등대매도")) {
-    state.config.beaconInvest = m.tqqqActualCost;
-    if ((Number(state.config.totalSeed) || 0) > 0) {
-      state.config.beaconPct = Number(((m.tqqqActualCost / Number(state.config.totalSeed)) * 100).toFixed(2));
-    }
+  state.config.beaconInvest = m.tqqqActualCost;
+  if ((Number(state.config.totalSeed) || 0) > 0) {
+    state.config.beaconPct = Number(((m.tqqqActualCost / Number(state.config.totalSeed)) * 100).toFixed(2));
   }
 }
 
@@ -293,7 +339,7 @@ function renderAll() {
   document.getElementById("headerSummary").textContent =
     `총시드 ${fmtUsd(m.totalSeed)} · 배 ${cfg.divisions}칸 · ${oi.tide} ×${m.activeMult}`;
 
-  // Top 2 Summary Cards matching uploaded image
+  // Top 2 Summary Cards
   const totalInvested = m.openCost + m.tqqqActualCost;
   const loopRemainCash = Math.max(0, m.cashBalance);
   const totalCumulativeProfit = m.realizedSum + m.openPnl + m.tqqqPnl;
@@ -338,15 +384,39 @@ function renderAll() {
   document.getElementById("lblActiveMult").textContent =
     oi.tide === "썰물" ? "썰물 하락 배수(배)" : "밀물 상승 배수(배)";
   document.getElementById("inpOrderMult").value = m.activeMult;
-  document.getElementById("inpPrevSoxl").value = oi.prevSoxl;
-  document.getElementById("inpPrevTqqq").value = oi.prevTqqq;
+  document.getElementById("inpPrevSoxl").value = oi.prevSoxl || "";
+  document.getElementById("inpLiveSoxl").value = oi.liveSoxl || "";
+  document.getElementById("inpPrevTqqq").value = oi.prevTqqq || "";
 
-  // TQQQ Inputs (auto-summed from base + journal 등대매수/등대매도)
+  // Live vs Prev Close comparison bar
+  const prevS = Number(oi.prevSoxl) || 0;
+  const liveS = Number(oi.liveSoxl) || prevS;
+  document.getElementById("lblSoxlPrevClose").textContent = fmtUsd(prevS);
+  const livePriceEl = document.getElementById("lblSoxlLivePrice");
+  const liveDiffEl = document.getElementById("lblSoxlLiveDiff");
+  livePriceEl.textContent = fmtUsd(liveS);
+  if (prevS > 0 && liveS > 0) {
+    const diffPct = ((liveS - prevS) / prevS) * 100;
+    const dSign = diffPct >= 0 ? "+" : "";
+    liveDiffEl.textContent = `(${dSign}${diffPct.toFixed(2)}%)`;
+    livePriceEl.className = diffPct >= 0 ? "accent-green" : "accent-red";
+  } else {
+    liveDiffEl.textContent = "(0.00%)";
+    livePriceEl.className = "accent-blue";
+  }
+
+  // 2. TQQQ Inputs: Free input without locked default values
   document.getElementById("inpTqqqInvest").value = m.tqqqActualCost.toFixed(2);
-  document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice.toFixed(2);
-  document.getElementById("inpTqqqQty").value = m.tqqqQty;
+  document.getElementById("inpTqqqBuyPrice").value = m.tqqqBuyPrice > 0 ? m.tqqqBuyPrice.toFixed(2) : "";
+  document.getElementById("inpTqqqQty").value = m.tqqqQty > 0 ? m.tqqqQty : "";
   document.getElementById("tqqqSummaryLine").innerHTML =
     `총투자금: <strong>${fmtUsd(m.tqqqActualCost)}</strong> · 평단: <strong>$${m.tqqqBuyPrice.toFixed(2)}</strong> · 수량: <strong>${m.tqqqQty}주</strong> · 평가손익: <strong class="${m.tqqqPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(m.tqqqPnl)}</strong>`;
+
+  // 5. Next LP sequence indicator
+  const nextSeqEl = document.getElementById("nextLotSeqHint");
+  if (nextSeqEl) {
+    nextSeqEl.textContent = `다음 매수 순번: ${getNextSoxlLotId()}`;
+  }
 
   const tideBadge = document.getElementById("tideBadge");
   tideBadge.textContent = `${oi.tide} ×${m.activeMult}`;
@@ -362,10 +432,10 @@ function renderAll() {
 function renderBuyOrders(m) {
   const listEl = document.getElementById("buyOrderList");
   listEl.innerHTML = "";
+  // 1. LOC buy calculation strictly uses prevSoxl (전일 종가)
   const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
   const feeRate = (Number(state.config.feePct) || 0) / 100;
 
-  // Calculate dynamic weight denominator across all non-net sinker stages
   const sinkRows = state.ladder.filter((item) => !item.isNet);
   const totalSinkWeight = sinkRows.reduce((acc, item) => acc + (Number(item.weightUnits) || 1), 0) || 1;
 
@@ -491,8 +561,8 @@ function renderBuyOrders(m) {
       const price = Number(btn.dataset.price) || 0;
       const qty = Math.floor(Number(btn.dataset.qty) || 0);
       if (price <= 0 || qty <= 0) return;
-      const nextNum = state.lots.length + 1;
-      const lotId = `LP-${String(nextNum).padStart(2, "0")}`;
+      // 5. Assign next LP-Sxx sequence after latest journal LP
+      const lotId = getNextSoxlLotId();
       const dt = state.orderInput.date;
       const td = state.orderInput.tide;
 
@@ -511,7 +581,6 @@ function renderBuyOrders(m) {
       if (removed) {
         delete state.buyOverrides[removed.id];
       }
-      // Re-number remaining sinker stages cleanly
       let sinkNum = 1;
       state.ladder.forEach((item) => {
         if (!item.isNet) {
@@ -531,19 +600,43 @@ function renderSellOrders(m) {
   const targetRate = (Number(state.config.targetPct) || 0) / 100;
   const feeRate = (Number(state.config.feePct) || 0) / 100;
 
-  const indexed = state.lots.map((lot, idx) => ({ lot, idx }));
-  const sortedByPrice = [...indexed].sort((a, b) => Number(a.lot.buyPrice) - Number(b.lot.buyPrice));
+  // 5. Build display list from state.lots; if empty, derive open lots from journal after latest LP sequence
+  const displayLots = state.lots.map((lot, idx) => ({ lot, idx, fromJournal: false }));
+
+  if (displayLots.length === 0) {
+    // Check unclosed buys in journal
+    const map = {};
+    state.journal.forEach((row) => {
+      if (!row.lotId) return;
+      if (row.side === "매수") {
+        if (!map[row.lotId]) {
+          map[row.lotId] = { id: row.lotId, date: row.date, buyPrice: Number(row.price) || 0, qty: 0 };
+        }
+        map[row.lotId].qty += Number(row.qty) || 0;
+        map[row.lotId].buyPrice = Number(row.price) || map[row.lotId].buyPrice;
+      } else if (row.side === "매도" && map[row.lotId]) {
+        map[row.lotId].qty -= Number(row.qty) || 0;
+      }
+    });
+    Object.values(map).forEach((item, i) => {
+      if (item.qty > 0) {
+        displayLots.push({ lot: item, idx: `j-${i}`, fromJournal: true });
+      }
+    });
+  }
+
+  const sortedByPrice = [...displayLots].sort((a, b) => Number(a.lot.buyPrice) - Number(b.lot.buyPrice));
   const rankMap = {};
   sortedByPrice.forEach((item, rIdx) => {
     rankMap[item.idx] = rIdx + 1;
   });
 
-  if (state.lots.length === 0) {
-    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">미청산 보유 묶음이 없습니다. 매수 체결 후 여기에 표시됩니다.</div>`;
+  if (displayLots.length === 0) {
+    listEl.innerHTML = `<div class="muted-sm" style="text-align:center; padding:12px;">미청산 보유 묶음이 없습니다. 다음 매수 시 <strong>${getNextSoxlLotId()}</strong> 순번으로 생성됩니다.</div>`;
     return;
   }
 
-  indexed.forEach(({ lot, idx }) => {
+  displayLots.forEach(({ lot, idx, fromJournal }) => {
     const ov = state.sellOverrides[idx] || {};
     const buyPrice = Number(lot.buyPrice) || 0;
     const qty = Number(lot.qty) || 0;
@@ -567,22 +660,22 @@ function renderSellOrders(m) {
         </div>
         <div class="order-row-meta">
           <span class="muted-sm">예상 <strong class="${estNetPnl >= 0 ? "accent-green" : "accent-red"}">${fmtUsd(estNetPnl)}</strong></span>
-          <button class="btn-exec" data-exec-sell="${idx}" data-price="${targetPrice}" data-qty="${sellQty}">익절</button>
-          <button class="btn-del" data-del-sell-lot="${idx}">삭제</button>
+          <button class="btn-exec" data-exec-sell="${idx}" data-from-j="${fromJournal ? "1" : "0"}" data-lot-id="${lot.id}" data-buy-price="${buyPrice}" data-price="${targetPrice}" data-qty="${sellQty}">익절</button>
+          ${!fromJournal ? `<button class="btn-del" data-del-sell-lot="${idx}">삭제</button>` : ""}
         </div>
       </div>
       <div class="order-fields-grid sell-grid">
         <div class="mini-field">
           <label>매수 평단가($)</label>
-          <input type="number" step="0.01" class="mini-input" data-sell-idx="${idx}" data-field="buyPrice" value="${buyPrice.toFixed(2)}" />
+          <input type="number" step="0.01" class="mini-input" data-sell-idx="${idx}" data-from-j="${fromJournal ? "1" : "0"}" data-field="buyPrice" value="${buyPrice.toFixed(2)}" />
         </div>
         <div class="mini-field">
           <label>매도 수량(주)</label>
-          <input type="number" step="1" class="mini-input" data-sell-idx="${idx}" data-field="qty" value="${sellQty}" />
+          <input type="number" step="1" class="mini-input" data-sell-idx="${idx}" data-from-j="${fromJournal ? "1" : "0"}" data-field="qty" value="${sellQty}" />
         </div>
         <div class="mini-field">
           <label>목표 매도가($)</label>
-          <input type="number" step="0.01" class="mini-input" data-sell-idx="${idx}" data-field="targetPrice" value="${targetPrice.toFixed(2)}" />
+          <input type="number" step="0.01" class="mini-input" data-sell-idx="${idx}" data-from-j="${fromJournal ? "1" : "0"}" data-field="targetPrice" value="${targetPrice.toFixed(2)}" />
         </div>
       </div>
     `;
@@ -591,11 +684,12 @@ function renderSellOrders(m) {
 
   listEl.querySelectorAll("input.mini-input").forEach((inp) => {
     inp.addEventListener("change", (e) => {
-      const idx = Number(e.target.dataset.sellIdx);
+      const idx = e.target.dataset.sellIdx;
+      const fromJ = e.target.dataset.fromJ === "1";
       const field = e.target.dataset.field;
       const val = Number(e.target.value) || 0;
-      if (field === "buyPrice") {
-        state.lots[idx].buyPrice = val;
+      if (!fromJ && field === "buyPrice") {
+        state.lots[Number(idx)].buyPrice = val;
         delete state.sellOverrides[idx];
       } else {
         state.sellOverrides[idx] = { ...(state.sellOverrides[idx] || {}), [field]: val };
@@ -607,11 +701,33 @@ function renderSellOrders(m) {
 
   listEl.querySelectorAll("button.btn-exec").forEach((btn) => {
     btn.addEventListener("click", () => {
-      const idx = Number(btn.dataset.execSell);
+      const fromJ = btn.dataset.fromJ === "1";
       const sellPrice = Number(btn.dataset.price) || 0;
       const sellQty = Math.floor(Number(btn.dataset.qty) || 0);
+      if (sellPrice <= 0 || sellQty <= 0) return;
+
+      if (fromJ) {
+        const lotId = btn.dataset.lotId;
+        const buyPrice = Number(btn.dataset.buyPrice) || 0;
+        state.journal.push({
+          date: state.orderInput.date,
+          tide: state.orderInput.tide,
+          side: "매도",
+          lotId,
+          price: sellPrice,
+          qty: sellQty,
+          refBuyPrice: buyPrice
+        });
+        state.sellOverrides = {};
+        saveState();
+        renderAll();
+        showToast(`${lotId} 익절 매도 확정 (실현손익 반영)`);
+        return;
+      }
+
+      const idx = Number(btn.dataset.execSell);
       const lot = state.lots[idx];
-      if (!lot || sellPrice <= 0 || sellQty <= 0) return;
+      if (!lot) return;
 
       state.journal.push({
         date: state.orderInput.date,
@@ -649,7 +765,7 @@ function renderSellOrders(m) {
 function renderLots(m) {
   const listEl = document.getElementById("lotsList");
   listEl.innerHTML = "";
-  const prevSoxl = Number(state.orderInput.prevSoxl) || 0;
+  const evalSoxl = Number(state.orderInput.liveSoxl) || Number(state.orderInput.prevSoxl) || 0;
 
   let sumQty = 0;
   let sumCost = 0;
@@ -663,7 +779,7 @@ function renderLots(m) {
     const bp = Number(lot.buyPrice) || 0;
     const q = Number(lot.qty) || 0;
     const cost = bp * q;
-    const pnl = (prevSoxl - bp) * q;
+    const pnl = (evalSoxl - bp) * q;
     sumQty += q;
     sumCost += cost;
     sumPnl += pnl;
@@ -746,12 +862,18 @@ function renderJournal(m) {
     const q = Number(row.qty) || 0;
     const refBp = Number(row.refBuyPrice) || 0;
     const tradeAmt = pr * q;
-    const pnl = row.side === "매도"
+    const isSellSide = row.side === "매도" || row.side === "등대매도";
+    const isBeaconSide = row.side === "등대매수" || row.side === "등대매도";
+
+    // 4. Ensure TQQQ beacon rows display LP-T00 format if missing or still using LP-Sxx
+    if (isBeaconSide && (!row.lotId || !String(row.lotId).toUpperCase().startsWith("LP-T"))) {
+      row.lotId = `LP-T${String(idx + 1).padStart(2, "0")}`;
+    }
+
+    const pnl = isSellSide
       ? (pr - refBp) * q - (pr * q + refBp * q) * feeRate
       : 0;
 
-    const isSellSide = row.side === "매도" || row.side === "등대매도";
-    const isBeaconSide = row.side === "등대매수" || row.side === "등대매도";
     const sideClass = row.side === "매도" ? "side-sell" : (isBeaconSide ? "side-beacon" : "side-buy");
     const badgeColor = row.side === "매도" ? "accent-green" : (isBeaconSide ? "accent-amber" : "accent-blue");
 
@@ -824,7 +946,16 @@ function renderJournal(m) {
     el.addEventListener("change", (e) => {
       const idx = Number(e.target.dataset.jIdx);
       const field = e.target.dataset.field;
-      if (["date", "tide", "side", "lotId"].includes(field)) {
+      if (field === "side") {
+        const newSide = e.target.value;
+        state.journal[idx].side = newSide;
+        // 4. Automatically switch lotId prefix to LP-T00 when changed to 등대매수/등대매도
+        if ((newSide === "등대매수" || newSide === "등대매도") && !String(state.journal[idx].lotId).toUpperCase().startsWith("LP-T")) {
+          state.journal[idx].lotId = getNextBeaconLotId();
+        } else if ((newSide === "매수" || newSide === "매도") && String(state.journal[idx].lotId).toUpperCase().startsWith("LP-T")) {
+          state.journal[idx].lotId = getNextSoxlLotId();
+        }
+      } else if (["date", "tide", "lotId"].includes(field)) {
         state.journal[idx][field] = e.target.value;
       } else {
         state.journal[idx][field] = Number(e.target.value) || 0;
@@ -877,7 +1008,7 @@ function renderSettingsAndRebal(m) {
   document.getElementById("rebActionText").textContent = actionMsg;
 }
 
-// 4. Ultra-Fast & Accurate SOXL/TQQQ Quote Fetcher (Direct CORS APIs + Multi-Proxy Race)
+// 1. Separate Prev Close (previousClose / chartPreviousClose) AND Live Price (regularMarketPrice / closePrice)
 function fetchWithTimeout(url, options = {}, timeoutMs = 4500) {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
@@ -902,21 +1033,36 @@ function formatUsDateFromUnix(sec) {
   }
 }
 
-function extractNaverPrice(data) {
-  const rawPrice = data?.closePrice || data?.nowPrice || data?.currentPrice;
-  const num = Number(String(rawPrice || "").replace(/,/g, ""));
-  if (!num || Number.isNaN(num) || num <= 0) throw new Error("naver invalid price");
+function extractNaverQuote(data) {
+  const rawLive = data?.nowPrice || data?.currentPrice || data?.closePrice;
+  const liveNum = Number(String(rawLive || "").replace(/,/g, ""));
+  if (!liveNum || Number.isNaN(liveNum) || liveNum <= 0) throw new Error("naver invalid price");
+
+  // Naver overseas ETF provides basePrice (전일종가) or compareToPreviousClosePrice
+  let prevNum = Number(String(data?.basePrice || data?.prevClosePrice || "").replace(/,/g, ""));
+  if (!prevNum || Number.isNaN(prevNum) || prevNum <= 0) {
+    const diffRaw = Number(String(data?.compareToPreviousClosePrice || "0").replace(/,/g, ""));
+    const code = String(data?.compareToPreviousPrice?.code || "");
+    if (!Number.isNaN(diffRaw) && diffRaw !== 0) {
+      // code "5" or "4" means falling, "2" or "1" means rising
+      const signedDiff = (code === "4" || code === "5") ? -Math.abs(diffRaw) : diffRaw;
+      prevNum = Number((liveNum - signedDiff).toFixed(2));
+    } else {
+      prevNum = liveNum;
+    }
+  }
+
   const tradedAt = String(data?.localTradedAt || "");
   const m = tradedAt.match(/(\d{4})-(\d{2})-(\d{2})/);
   const marketDate = m ? `${m[2]}/${m[3]}` : "";
   return {
-    price: Number(num.toFixed(2)),
+    prevClose: Number(prevNum.toFixed(2)),
+    livePrice: Number(liveNum.toFixed(2)),
     source: "네이버 증권",
     marketDate
   };
 }
 
-// 1) Direct CORS endpoint for Naver Overseas ETF (SOXL.K / TQQQ.O) - zero proxy hop
 async function sourceNaverDirect(symbol) {
   const cb = Date.now();
   const suffix = symbol === "SOXL" ? "K" : "O";
@@ -930,47 +1076,54 @@ async function sourceNaverDirect(symbol) {
       const res = await fetchWithTimeout(u, { cache: "no-store" }, 3500);
       if (!res.ok) throw new Error("naver direct http");
       const data = await res.json();
-      return extractNaverPrice(data);
+      return extractNaverQuote(data);
     })
   );
 }
 
-// 2) Direct CORS endpoint via Nasdaq Official Quote API
 async function sourceNasdaqDirect(symbol) {
   const url = `https://api.nasdaq.com/api/quote/${symbol}/info?assetclass=etf`;
   const res = await fetchWithTimeout(url, { cache: "no-store" }, 4000);
   if (!res.ok) throw new Error("nasdaq http");
   const json = await res.json();
-  const raw = json?.data?.primaryData?.lastSalePrice;
-  const num = Number(String(raw || "").replace(/[^0-9.]/g, ""));
-  if (!num || Number.isNaN(num) || num <= 0) throw new Error("nasdaq invalid");
-  const dtRaw = String(json?.data?.primaryData?.lastTradeTimestamp || "");
+  const pd = json?.data?.primaryData || {};
+  const liveNum = Number(String(pd.lastSalePrice || "").replace(/[^0-9.]/g, ""));
+  if (!liveNum || Number.isNaN(liveNum) || liveNum <= 0) throw new Error("nasdaq invalid");
+
+  const netChange = Number(String(pd.netChange || "0").replace(/[^0-9.-]/g, ""));
+  const prevNum = !Number.isNaN(netChange) && netChange !== 0
+    ? Number((liveNum - netChange).toFixed(2))
+    : liveNum;
+
+  const dtRaw = String(pd.lastTradeTimestamp || "");
   let marketDate = "";
   const parsedDt = Date.parse(dtRaw);
   if (!Number.isNaN(parsedDt)) {
     marketDate = formatUsDateFromUnix(Math.floor(parsedDt / 1000));
   }
   return {
-    price: Number(num.toFixed(2)),
+    prevClose: prevNum,
+    livePrice: Number(liveNum.toFixed(2)),
     source: "나스닥 공식",
     marketDate
   };
 }
 
-// 3) Direct CORS endpoint via CNBC Quote API
 async function sourceCnbcDirect(symbol) {
   const url = `https://quote.cnbc.com/quote-html-webservice/restQuote/symbolType/symbol?symbols=${symbol}&requestMethod=itv&noCache=${Date.now()}&partnerId=2&fund=1&exthrs=1&output=json`;
   const res = await fetchWithTimeout(url, { cache: "no-store" }, 4000);
   if (!res.ok) throw new Error("cnbc http");
   const json = await res.json();
   const q = json?.FormattedQuoteResult?.FormattedQuote?.[0];
-  const num = Number(String(q?.last || "").replace(/[^0-9.]/g, ""));
-  if (!num || Number.isNaN(num) || num <= 0) throw new Error("cnbc invalid");
+  const liveNum = Number(String(q?.last || "").replace(/[^0-9.]/g, ""));
+  if (!liveNum || Number.isNaN(liveNum) || liveNum <= 0) throw new Error("cnbc invalid");
+  const prevNum = Number(String(q?.previous_day_closing || "").replace(/[^0-9.]/g, "")) || liveNum;
   const dtStr = String(q?.last_time || "");
   const m = dtStr.match(/(\d{4})-(\d{2})-(\d{2})/);
   const marketDate = m ? `${m[2]}/${m[3]}` : "";
   return {
-    price: Number(num.toFixed(2)),
+    prevClose: Number(prevNum.toFixed(2)),
+    livePrice: Number(liveNum.toFixed(2)),
     source: "CNBC 시세",
     marketDate
   };
@@ -988,37 +1141,50 @@ function parseYahooChartText(rawText) {
   const timestamps = result.timestamp || [];
   const rawCloses = result.indicators?.quote?.[0]?.close || [];
 
-  let lastClose = null;
-  let lastTs = null;
-  for (let i = rawCloses.length - 1; i >= 0; i--) {
+  const validCloses = [];
+  for (let i = 0; i < rawCloses.length; i++) {
     const v = rawCloses[i];
     if (typeof v === "number" && !Number.isNaN(v) && v > 0) {
-      lastClose = v;
-      lastTs = timestamps[i] || meta.regularMarketTime || null;
-      break;
+      validCloses.push({ price: v, ts: timestamps[i] || null });
     }
   }
 
   const regPrice = typeof meta.regularMarketPrice === "number" && meta.regularMarketPrice > 0
     ? meta.regularMarketPrice
-    : null;
-  const regTime = typeof meta.regularMarketTime === "number" ? meta.regularMarketTime : 0;
+    : (validCloses.length > 0 ? validCloses[validCloses.length - 1].price : null);
 
-  let finalPrice = lastClose;
-  let finalTs = lastTs;
-  if (regPrice && (!finalPrice || regTime >= (finalTs || 0))) {
-    finalPrice = regPrice;
-    finalTs = regTime || finalTs;
-  }
-
-  if (!finalPrice || Number.isNaN(finalPrice) || finalPrice <= 0) {
+  if (!regPrice || Number.isNaN(regPrice) || regPrice <= 0) {
     throw new Error("invalid yahoo price");
   }
 
+  // Determine true previous close (not intraday live price)
+  let prevClose = typeof meta.previousClose === "number" && meta.previousClose > 0
+    ? meta.previousClose
+    : (typeof meta.chartPreviousClose === "number" && meta.chartPreviousClose > 0 ? meta.chartPreviousClose : null);
+
+  if (validCloses.length >= 2) {
+    const lastEntry = validCloses[validCloses.length - 1];
+    const prevEntry = validCloses[validCloses.length - 2];
+    // If market is open (regPrice differs from last daily bar or last bar is today), use previous day's close
+    if (Math.abs(lastEntry.price - regPrice) < 0.001) {
+      prevClose = prevClose || lastEntry.price;
+    } else {
+      prevClose = lastEntry.price;
+    }
+    if (!prevClose) prevClose = prevEntry.price;
+  } else if (!prevClose) {
+    prevClose = regPrice;
+  }
+
+  const regTime = typeof meta.regularMarketTime === "number"
+    ? meta.regularMarketTime
+    : (validCloses.length > 0 ? validCloses[validCloses.length - 1].ts : null);
+
   return {
-    price: Number(finalPrice.toFixed(2)),
+    prevClose: Number(prevClose.toFixed(2)),
+    livePrice: Number(regPrice.toFixed(2)),
     source: "야후 파이낸스",
-    marketDate: formatUsDateFromUnix(finalTs)
+    marketDate: formatUsDateFromUnix(regTime)
   };
 }
 
@@ -1036,16 +1202,16 @@ async function fetchSymbolQuoteFast(symbol) {
   const naverUrl = `https://api.stock.naver.com/etf/${symbol}.${suffix}/basic?_=${cb}`;
 
   const tasks = [
-    sourceNaverDirect(symbol),
-    sourceCnbcDirect(symbol),
-    sourceNasdaqDirect(symbol),
     sourceYahooProxy(`https://api.allorigins.win/raw?url=${encodeURIComponent(yUrl)}`),
     sourceYahooProxy(`https://api.codetabs.com/v1/proxy?quest=${encodeURIComponent(yUrl)}`),
     sourceYahooProxy(`https://corsproxy.io/?url=${encodeURIComponent(yUrl)}`),
+    sourceCnbcDirect(symbol),
+    sourceNasdaqDirect(symbol),
+    sourceNaverDirect(symbol),
     sourceYahooProxy(`https://thingproxy.freeboard.io/fetch/${yUrl}`),
     fetchWithTimeout(`https://api.allorigins.win/raw?url=${encodeURIComponent(naverUrl)}`, { cache: "no-store" }, 4500)
       .then((r) => { if (!r.ok) throw new Error("naver proxy"); return r.json(); })
-      .then(extractNaverPrice)
+      .then(extractNaverQuote)
   ];
 
   try {
@@ -1060,10 +1226,10 @@ async function handleFetchYahooPrices(silent = false) {
   const statusEl = document.getElementById("yahooStatusText");
   if (btn) {
     btn.disabled = true;
-    btn.textContent = "⏳ 최신 종가 고속 조회 중...";
+    btn.textContent = "⏳ 전일 종가 · 실시간 시세 조회 중...";
   }
   if (statusEl) {
-    statusEl.textContent = "SOXL · TQQQ 공식 시세 서버 8곳 동시 조회 중...";
+    statusEl.textContent = "SOXL 전일종가(LOC 기준) 및 실시간 현재가 조회 중...";
   }
 
   const t0 = performance.now();
@@ -1075,23 +1241,28 @@ async function handleFetchYahooPrices(silent = false) {
 
   if (btn) {
     btn.disabled = false;
-    btn.textContent = "🔄 전일(최신) 종가 빠른 자동조회";
+    btn.textContent = "🔄 전일 종가 · 실시간 시세 자동조회";
   }
 
   if (soxlRes || tqqqRes) {
-    if (soxlRes) state.orderInput.prevSoxl = soxlRes.price;
-    if (tqqqRes) state.orderInput.prevTqqq = tqqqRes.price;
+    if (soxlRes) {
+      state.orderInput.prevSoxl = soxlRes.prevClose;
+      state.orderInput.liveSoxl = soxlRes.livePrice;
+    }
+    if (tqqqRes) {
+      state.orderInput.prevTqqq = tqqqRes.prevClose;
+    }
     state.buyOverrides = {};
     saveState();
     renderAll();
 
     const refObj = soxlRes || tqqqRes;
-    const dateTag = refObj.marketDate ? `미장 ${refObj.marketDate} 마감` : "최신 마감";
+    const dateTag = refObj.marketDate ? `미장 ${refObj.marketDate}` : "최신 시세";
     if (statusEl) {
-      statusEl.textContent = `✅ ${refObj.source} 반영 (${dateTag} · ${elapsedSec}초) — SOXL $${Number(state.orderInput.prevSoxl).toFixed(2)} / TQQQ $${Number(state.orderInput.prevTqqq).toFixed(2)}`;
+      statusEl.textContent = `✅ ${refObj.source} (${dateTag} · ${elapsedSec}초) — SOXL 전일종가 $${Number(state.orderInput.prevSoxl).toFixed(2)} / 실시간 $${Number(state.orderInput.liveSoxl).toFixed(2)}`;
     }
     if (!silent) {
-      showToast(`종가 반영 완료 (${elapsedSec}초 · ${dateTag})`);
+      showToast(`시세 반영 완료 (${elapsedSec}초)`);
     }
   } else {
     if (statusEl) {
@@ -1124,16 +1295,13 @@ function bindEvents() {
     });
   });
 
-  // 7. Top Save Button
   document.getElementById("btnSaveAll").addEventListener("click", () => {
     saveState(true);
     renderAll();
   });
 
-  // 4. Yahoo Finance button
   document.getElementById("btnFetchYahoo").addEventListener("click", () => handleFetchYahooPrices(false));
 
-  // 1. Add sinker stage button
   document.getElementById("btnAddSink").addEventListener("click", () => {
     const sinkRows = state.ladder.filter((item) => !item.isNet);
     const nextStageNum = sinkRows.length + 1;
@@ -1153,7 +1321,6 @@ function bindEvents() {
     showToast(`그물추 ${nextStageNum}단계 추가됨`);
   });
 
-  // Order criteria inputs
   document.getElementById("inpOrderDate").addEventListener("change", (e) => {
     state.orderInput.date = e.target.value || getTodayStr();
     saveState();
@@ -1167,7 +1334,6 @@ function bindEvents() {
     renderAll();
   });
 
-  // 6. Editable tide multiplier directly on LOC Order page
   document.getElementById("inpOrderMult").addEventListener("change", (e) => {
     const val = Number(e.target.value) || 0;
     if (state.orderInput.tide === "썰물") {
@@ -1187,24 +1353,19 @@ function bindEvents() {
     renderAll();
   });
 
+  document.getElementById("inpLiveSoxl").addEventListener("change", (e) => {
+    state.orderInput.liveSoxl = Number(e.target.value) || 0;
+    saveState();
+    renderAll();
+  });
+
   document.getElementById("inpPrevTqqq").addEventListener("change", (e) => {
     state.orderInput.prevTqqq = Number(e.target.value) || 0;
     saveState();
     renderAll();
   });
 
-  // 5. TQQQ auto-calculation when buyPrice or qty changes
-  document.getElementById("inpTqqqInvest").addEventListener("change", (e) => {
-    const val = Number(e.target.value) || 0;
-    state.config.beaconInvest = val;
-    if ((Number(state.config.totalSeed) || 0) > 0) {
-      state.config.beaconPct = Number(((val / Number(state.config.totalSeed)) * 100).toFixed(2));
-    }
-    state.buyOverrides = {};
-    saveState();
-    renderAll();
-  });
-
+  // 2. TQQQ free input for buyPrice and qty
   document.getElementById("inpTqqqBuyPrice").addEventListener("change", (e) => {
     state.tqqq.buyPrice = Number(e.target.value) || 0;
     syncTqqqInvestFromPriceQty();
@@ -1274,9 +1435,8 @@ function bindEvents() {
   });
 
   document.getElementById("btnAddLot").addEventListener("click", () => {
-    const nextIdx = state.lots.length + 1;
     state.lots.push({
-      id: `LP-${String(nextIdx).padStart(2, "0")}`,
+      id: getNextSoxlLotId(),
       date: state.orderInput.date,
       buyPrice: Number(state.orderInput.prevSoxl) || 0,
       qty: 1
@@ -1285,12 +1445,13 @@ function bindEvents() {
     renderAll();
   });
 
+  // 5. Add SOXL journal entry with next sequence ID after latest LP in journal
   document.getElementById("btnAddJournal").addEventListener("click", () => {
     state.journal.push({
       date: state.orderInput.date,
       tide: state.orderInput.tide,
       side: "매수",
-      lotId: `LP-${String(state.lots.length + 1).padStart(2, "0")}`,
+      lotId: getNextSoxlLotId(),
       price: Number(state.orderInput.prevSoxl) || 0,
       qty: 1,
       refBuyPrice: Number(state.orderInput.prevSoxl) || 0
@@ -1298,6 +1459,25 @@ function bindEvents() {
     saveState();
     renderAll();
   });
+
+  // 4. Add TQQQ Beacon journal entry with LP-T00 sequence ID
+  const btnAddBeacon = document.getElementById("btnAddBeaconJournal");
+  if (btnAddBeacon) {
+    btnAddBeacon.addEventListener("click", () => {
+      const tPrice = Number(state.orderInput.prevTqqq) || 0;
+      state.journal.push({
+        date: state.orderInput.date,
+        tide: state.orderInput.tide,
+        side: "등대매수",
+        lotId: getNextBeaconLotId(),
+        price: tPrice,
+        qty: 1,
+        refBuyPrice: tPrice
+      });
+      saveState();
+      renderAll();
+    });
+  }
 
   document.getElementById("btnExportJson").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(state, null, 2)], { type: "application/json" });
@@ -1321,11 +1501,10 @@ function bindEvents() {
 }
 
 bindEvents();
-// Migrate legacy default placeholder 77.05 / 62.01 if present
 if (state.orderInput.prevSoxl === 77.05 && state.orderInput.prevTqqq === 62.01) {
   state.orderInput.prevSoxl = 0;
+  state.orderInput.liveSoxl = 0;
   state.orderInput.prevTqqq = 0;
 }
 renderAll();
-// Automatically fetch latest closing prices when opening the app
 handleFetchYahooPrices(true);

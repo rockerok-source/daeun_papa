@@ -571,3 +571,55 @@ input:focus, select:focus {
 .nav-ico {
   font-size: 15px;
 }
+
+
+/* v15 Enhancements: Sticky Top Dashboard + Scrollable Journal List + Live Quote Bar */
+.sticky-dashboard {
+  position: sticky;
+  top: 0;
+  z-index: 35;
+  background: rgba(11, 15, 23, 0.96);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 7px;
+}
+
+.sticky-dashboard .top-bar {
+  position: static;
+  background: transparent;
+  backdrop-filter: none;
+  border-bottom: 1px solid rgba(36, 48, 68, 0.7);
+}
+
+.live-quote-bar {
+  margin-top: 8px;
+  padding: 7px 10px;
+  border-radius: 8px;
+  background: var(--bg-card-alt);
+  border: 1px solid var(--border);
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+  color: var(--text-sub);
+  gap: 6px;
+}
+
+input[readonly] {
+  background: #0b111c;
+  color: #94a3b8;
+  border-style: dashed;
+}
+
+.journal-card-shell {
+  display: flex;
+  flex-direction: column;
+}
+
+.journal-scroll-area {
+  max-height: calc(100vh - 385px);
+  min-height: 220px;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding-right: 2px;
+}
